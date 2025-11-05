@@ -179,7 +179,7 @@ public final class OmniGraphOverride {
     private static boolean isSinkSupportNative = true;
 
     private static boolean isConstraintEnforcerSupportNative = true;
-    private static final Set<String> SOURCE_SINK_SUPPORT_DATA_TYPE = new HashSet<>(Arrays.asList(
+    private static final Set<String> SOURCE_SUPPORT_DATA_TYPE = new HashSet<>(Arrays.asList(
             "BIGINT",
             "INTEGER",
             "TIMESTAMP_WITHOUT_TIME_ZONE(0)",
@@ -190,6 +190,21 @@ public final class OmniGraphOverride {
             "VARCHAR(2000)",
             "VARCHAR(9)",
             "STRING",
+            "TIMESTAMP_WITH_LOCAL_TIME_ZONE"));
+
+    private static final Set<String> SINK_SUPPORT_DATA_TYPE = new HashSet<>(Arrays.asList(
+            "BIGINT",
+            "INTEGER",
+            "TIMESTAMP_WITHOUT_TIME_ZONE(0)",
+            "TIMESTAMP_WITHOUT_TIME_ZONE(1)",
+            "TIMESTAMP_WITHOUT_TIME_ZONE(2)",
+            "TIMESTAMP_WITHOUT_TIME_ZONE(3)",
+            "VARCHAR(2147483647)",
+            "VARCHAR(2000)",
+            "VARCHAR(9)",
+            "STRING",
+            "DECIMAL64",
+            "DECIMAL128",
             "TIMESTAMP_WITH_LOCAL_TIME_ZONE"));
 
     /**
@@ -562,7 +577,7 @@ public final class OmniGraphOverride {
             newJobType = jobType.getCombinationsJobType(JobType.STREAM);
         }
         for (String type : inputTypeList) {
-            isSourceSupportNative = SOURCE_SINK_SUPPORT_DATA_TYPE.contains(type);
+            isSourceSupportNative = SOURCE_SUPPORT_DATA_TYPE.contains(type);
             if (!isSourceSupportNative) {
                 break;
             }
@@ -579,7 +594,16 @@ public final class OmniGraphOverride {
             }
         }
         for (String type : inputTypeList) {
-            isSinkSupportNative = SOURCE_SINK_SUPPORT_DATA_TYPE.contains(type);
+            if (type.matches("^DECIMAL64\\([^)]*\\)$")) {
+                type = "DECIMAL64";
+                LOG.info("converted to DECIMAL64");
+            }
+
+            if (type.matches("^DECIMAL128\\([^)]*\\)$")) {
+                type = "DECIMAL128";
+                LOG.info("converted to DECIMAL128");
+            }
+            isSinkSupportNative = SINK_SUPPORT_DATA_TYPE.contains(type);
             if (!isSinkSupportNative) {
                 break;
             }
@@ -595,7 +619,16 @@ public final class OmniGraphOverride {
             }
         }
         for (String type : inputTypeList) {
-            isConstraintEnforcerSupportNative = SOURCE_SINK_SUPPORT_DATA_TYPE.contains(type);
+            if (type.matches("^DECIMAL64\\([^)]*\\)$")) {
+                type = "DECIMAL64";
+                LOG.info("converted to DECIMAL64");
+            }
+
+            if (type.matches("^DECIMAL128\\([^)]*\\)$")) {
+                type = "DECIMAL128";
+                LOG.info("converted to DECIMAL128");
+            }
+            isConstraintEnforcerSupportNative = SINK_SUPPORT_DATA_TYPE.contains(type);
             if (!isConstraintEnforcerSupportNative) {
                 break;
             }

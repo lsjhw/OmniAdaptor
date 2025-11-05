@@ -28,6 +28,7 @@ import static org.apache.flink.util.Preconditions.checkState;
 
 import com.huawei.omniruntime.flink.runtime.io.network.partition.OmniPipelinedSubpartitionView;
 
+import com.huawei.omniruntime.flink.streaming.api.graph.JobType;
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.runtime.event.AbstractEvent;
 import org.apache.flink.runtime.io.network.api.serialization.EventSerializer;
@@ -84,6 +85,8 @@ public abstract class BufferWritingResultPartition extends ResultPartition {
             omniCreditBasedSequenceNumberingViewReaderList = new ArrayList<>();
     private long totalWrittenBytes;
 
+    private JobType jobType = JobType.NULL;
+
     public BufferWritingResultPartition(
             String owningTaskName,
             int partitionIndex,
@@ -133,6 +136,10 @@ public abstract class BufferWritingResultPartition extends ResultPartition {
         }
 
         return totalBuffers;
+    }
+
+    public void setJobType(JobType jobType) {
+        this.jobType = jobType;
     }
 
     @Override
@@ -243,10 +250,10 @@ public abstract class BufferWritingResultPartition extends ResultPartition {
                 bindOmniCreditBasedSequenceNumberingViewReaderToSubpartitionView(availabilityListener);
             }else if(availabilityListener instanceof LocalInputChannel){
                 PipelinedSubpartition pipelinedSubpartition = (PipelinedSubpartition)subpartition;
-                readView = bindNativeLocalInputChannel(availabilityListener,pipelinedSubpartition,subpartitionIndex);
+                readView = bindNativeLocalInputChannel(availabilityListener,pipelinedSubpartition,subpartitionIndex, jobType);
             }
         }
-       
+
 
         LOG.debug("Created {}", readView);
 
@@ -514,13 +521,19 @@ public abstract class BufferWritingResultPartition extends ResultPartition {
 
         return totalWrittenBytes - totalNumberOfBytes;
     }
-    
+
     public ResultSubpartitionView bindNativeLocalInputChannel(BufferAvailabilityListener availabilityListener,
             PipelinedSubpartition resultSubpartition, int subpartitionIndex) throws PartitionNotFoundException {
         return new OmniPipelinedSubpartitionView(resultSubpartition, availabilityListener, nativeTaskRef,
                 subpartitionIndex);
     }
-    
+
+    public ResultSubpartitionView bindNativeLocalInputChannel(BufferAvailabilityListener availabilityListener,
+                                                              PipelinedSubpartition resultSubpartition, int subpartitionIndex, JobType jobType) throws PartitionNotFoundException {
+        return new OmniPipelinedSubpartitionView(resultSubpartition, availabilityListener, nativeTaskRef,
+                subpartitionIndex, jobType);
+    }
+
     public  boolean isNative(){
         return nativeTaskRef != -1 ;
     }

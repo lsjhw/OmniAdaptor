@@ -431,7 +431,7 @@ public class OmniTask extends Task {
         // action 1, natvie should do similary operation
         setupPartitionsAndGates(partitionWriters, inputGates);
         if (jobType == JobType.SQL) {
-            bindNativeTaskRefToResultPartition(nativeTaskRef, partitionWriters);
+            bindNativeTaskRefToResultPartition(nativeTaskRef, partitionWriters, jobType);
         }
         for (ResultPartitionWriter partitionWriter : partitionWriters) {
             taskEventDispatcher.registerPartition(partitionWriter.getPartitionId());
@@ -943,6 +943,16 @@ public class OmniTask extends Task {
             partition.setNativeTaskRef(nativeTaskRef);
         }
     }
+
+    private void bindNativeTaskRefToResultPartition(long nativeTaskRef,
+                                                    ResultPartitionWriter[] consumableNotifyingPartitionWriters, JobType jobType) {
+        for (ResultPartitionWriter partitionWriter : consumableNotifyingPartitionWriters) {
+            BufferWritingResultPartition partition = (BufferWritingResultPartition) partitionWriter;
+            partition.setNativeTaskRef(nativeTaskRef);
+            partition.setJobType(jobType);
+        }
+    }
+
     public void omniTriggerCheckpointBarrier(
             final long checkpointID,
             final long checkpointTimestamp,

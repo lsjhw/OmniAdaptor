@@ -177,6 +177,8 @@ public final class OmniGraphOverride {
     private static boolean isSourceSupportNative = true;
 
     private static boolean isSinkSupportNative = true;
+
+    private static boolean isConstraintEnforcerSupportNative = true;
     private static final Set<String> SOURCE_SINK_SUPPORT_DATA_TYPE = new HashSet<>(Arrays.asList(
             "BIGINT",
             "INTEGER",
@@ -584,6 +586,22 @@ public final class OmniGraphOverride {
         }
     }
 
+    private static void getConstraintEnforcerInputTypes(StreamNode node) {
+        List<String> inputTypeList = new ArrayList<>();
+        TypeSerializer<?>[] typeSerializersIns = node.getTypeSerializersIn();
+        for (TypeSerializer<?> typeSerializersIn : typeSerializersIns) {
+            if (typeSerializersIn instanceof AbstractRowDataSerializer) {
+                buildInputTypes(inputTypeList, typeSerializersIn);
+            }
+        }
+        for (String type : inputTypeList) {
+            isConstraintEnforcerSupportNative = SOURCE_SINK_SUPPORT_DATA_TYPE.contains(type);
+            if (!isConstraintEnforcerSupportNative) {
+                break;
+            }
+        }
+    }
+
     private static void buildInputTypes(List<String> inputTypeList, TypeSerializer<?> typeSerializerOut) {
         if (!(typeSerializerOut instanceof RowDataSerializer)) {
             return;
@@ -623,6 +641,8 @@ public final class OmniGraphOverride {
             return validateSource(operatorDescription);
         } else if (isSink(operatorName)) {
             return validateSink(operatorName, operatorFactory);
+        } else if (isConstraintEnforcer(operatorName)) {
+            return validateConstraintEnforcer();
         } else if (operatorName.contains(": Committer")) {
             return true;
         } else if (isPartitionCommitter(operatorName)) {
@@ -643,6 +663,10 @@ public final class OmniGraphOverride {
                 ValidateOperatorStrategyFactory.getStrategy(opSimpleName);
             return validateStrategy.executeValidateOperator(jsonMap);
         }
+    }
+
+    private static boolean validateConstraintEnforcer() {
+        return isConstraintEnforcerSupportNative;
     }
 
     private static boolean validateSink(String operatorName, StreamOperatorFactory operatorFactory) {
@@ -713,6 +737,10 @@ public final class OmniGraphOverride {
     private static boolean isSink(String operatorName) {
         Matcher matcher = SINK_REGEX.matcher(operatorName);
         return matcher.find();
+    }
+
+    private static boolean isConstraintEnforcer(String operatorName) {
+        return operatorName.contains("ConstraintEnforcer");
     }
 
     private static boolean isPartitionCommitter(String operatorName) {
@@ -807,6 +835,10 @@ public final class OmniGraphOverride {
                     } else {
                         return false;
                     }
+                }
+                if (isConstraintEnforcer(operatorName)) {
+                    getConstraintEnforcerInputTypes(node);
+                    continue;
                 }
                 if (operatorName.contains(": Committer")) {
                     continue;

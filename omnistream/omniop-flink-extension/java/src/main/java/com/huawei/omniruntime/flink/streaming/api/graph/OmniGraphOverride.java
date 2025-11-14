@@ -13,10 +13,6 @@ package com.huawei.omniruntime.flink.streaming.api.graph;
 
 import static org.apache.flink.util.Preconditions.checkState;
 
-import com.huawei.omniruntime.flink.runtime.tasks.OmniOneInputStreamTaskV2;
-import com.huawei.omniruntime.flink.runtime.tasks.OmniSourceOperatorStreamTaskV2;
-import com.huawei.omniruntime.flink.runtime.tasks.OmniSourceStreamTaskV2;
-import com.huawei.omniruntime.flink.runtime.tasks.OmniTwoInputStreamTaskV2;
 import com.huawei.omniruntime.flink.streaming.api.graph.validate.strategy.AbstractValidateOperatorStrategy;
 import com.huawei.omniruntime.flink.streaming.api.graph.validate.strategy.ValidateCalcOPStrategy;
 import com.huawei.omniruntime.flink.streaming.api.graph.validate.strategy.ValidateOperatorStrategyFactory;

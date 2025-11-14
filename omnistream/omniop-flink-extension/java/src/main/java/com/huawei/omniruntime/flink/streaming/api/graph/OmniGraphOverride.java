@@ -653,20 +653,6 @@ public final class OmniGraphOverride {
         }
     }
 
-    private static void updateInvokableClass(JobVertex jobVertex) {
-        if (jobVertex.getInvokableClassName().equals("org.apache.flink.streaming.runtime.tasks.TwoInputStreamTask")) {
-            jobVertex.setInvokableClass(OmniTwoInputStreamTaskV2.class);
-        } else if (jobVertex.getInvokableClassName().equals("org.apache.flink.streaming.runtime.tasks.OneInputStreamTask")) {
-            jobVertex.setInvokableClass(OmniOneInputStreamTaskV2.class);
-        } else if (jobVertex.getInvokableClassName().equals("org.apache.flink.streaming.runtime.tasks.SourceStreamTask")) {
-            jobVertex.setInvokableClass(OmniSourceStreamTaskV2.class);
-        } else if (jobVertex.getInvokableClassName().equals("org.apache.flink.streaming.runtime.tasks.SourceOperatorStreamTask")) {
-            jobVertex.setInvokableClass(OmniSourceOperatorStreamTaskV2.class);
-        } else {
-            new Exception("unsupported class");
-        }
-    }
-
     // true for omniTask
     private static boolean validateOperatorByNameForOmniTask(String operatorName, String operatorDescription,
         StreamOperatorFactory operatorFactory) {
@@ -706,8 +692,7 @@ public final class OmniGraphOverride {
         if (!isSinkSupportNative)  {
             return false;
         }
-        if (performanceMode && (operatorName.contains("nexmark_q20") || operatorName.contains("nexmark_q9")
-            || operatorName.contains("StreamingFileWriter"))) {
+        if (performanceMode && operatorName.contains("StreamingFileWriter")) {
             return false;
         }
         if (!(operatorFactory instanceof SinkWriterOperatorFactory)) {

@@ -181,16 +181,8 @@ public class OmniTaskWrapper {
     private IncrementalRemoteKeyedStateHandle deserializeIncrementalRemoteKeyedStateHandle(String metaStateHandleStr) {
         try {
             ObjectMapper mapper = new ObjectMapper();
-
             JsonNode rootNode = mapper.readTree(metaStateHandleStr);
-            UUID backendIdentifier = UUID.fromString(rootNode.get("backendIdentifier").asText());
-            long checkpointId = rootNode.get("checkpointId").asLong();
-            KeyGroupRange keyGroupRange = JsonHelper.fromJson(rootNode.get("keyGroupRange").toString(), KeyGroupRange.class);
-            long persistedSizeOfThisCheckpoint = rootNode.get("persistedSizeOfThisCheckpoint").asLong();
             String jstateHandleId = rootNode.get("stateHandleId").get("keyString").asText();
-            StateHandleID stateHandleId = new StateHandleID(jstateHandleId);
-
-            StreamStateHandle metaDataState = TaskStateSnapshotDeser.parseStreamStateHandle(rootNode.get("metaDataState"));
 
             List<HandleAndLocalPath> sharedState = new ArrayList<>();
             JsonNode sharedStateNode = rootNode.get("sharedState").get(1);
@@ -208,18 +200,31 @@ public class OmniTaskWrapper {
                 privateState.add(HandleAndLocalPath.of(handle, localPath));
             }
 
+            UUID backendIdentifier = UUID.fromString(rootNode.get("backendIdentifier").asText());
+            long checkpointId = rootNode.get("checkpointId").asLong();
+            KeyGroupRange keyGroupRange = JsonHelper.fromJson(
+                    rootNode.get("keyGroupRange").toString(),
+                    KeyGroupRange.class);
+            long persistedSizeOfThisCheckpoint = rootNode.get("persistedSizeOfThisCheckpoint").asLong();
+            StreamStateHandle metaDataState =
+                    TaskStateSnapshotDeser.parseStreamStateHandle(rootNode.get("metaDataState"));
+            StateHandleID stateHandleId = new StateHandleID(jstateHandleId);
+
             return IncrementalRemoteKeyedStateHandle.restore(
-                        backendIdentifier,
-                        keyGroupRange,
-                        checkpointId,
-                        sharedState,
-                        privateState,
-                        metaDataState,
-                        persistedSizeOfThisCheckpoint,
-                        stateHandleId);
+                    backendIdentifier,
+                    keyGroupRange,
+                    checkpointId,
+                    sharedState,
+                    privateState,
+                    metaDataState,
+                    persistedSizeOfThisCheckpoint,
+                    stateHandleId);
+        } catch (JsonHelper.JsonHelperException ex) {
+            throw ex;
         } catch (Exception e) {
             throw new JsonHelper.JsonHelperException(
-                    "Error deserializing metaStateHandleStr to IncrementalRemoteKeyedStateHandle: " + metaStateHandleStr, e);
+                    "Error deserializing metaStateHandleStr to IncrementalRemoteKeyedStateHandle: " +
+                            metaStateHandleStr, e);
         }
     }
 
@@ -230,11 +235,11 @@ public class OmniTaskWrapper {
         ObjectMapper mapper = new ObjectMapper();
         JsonNode rootNode = mapper.readTree(metaStateHandleStr);
         String classType = rootNode.get("@class").asText();
-        if (classType.equals("org.apache.flink.runtime.state.IncrementalLocalKeyedStateHandle")) {
+        if ("org.apache.flink.runtime.state.IncrementalLocalKeyedStateHandle".equals(classType)) {
             IncrementalLocalKeyedStateHandle localKeyedStateHandle =
                     deserializeIncrementalLocalKeyedStateHandle(metaStateHandleStr);
             metaStateHandle = localKeyedStateHandle.getMetaDataState();
-        } else if (classType.equals("org.apache.flink.runtime.state.IncrementalRemoteKeyedStateHandle")) {
+        } else if ("org.apache.flink.runtime.state.IncrementalRemoteKeyedStateHandle".equals(classType)) {
             IncrementalRemoteKeyedStateHandle remoteKeyedStateHandle =
                     deserializeIncrementalRemoteKeyedStateHandle(metaStateHandleStr);
             metaStateHandle = remoteKeyedStateHandle.getMetaStateHandle();

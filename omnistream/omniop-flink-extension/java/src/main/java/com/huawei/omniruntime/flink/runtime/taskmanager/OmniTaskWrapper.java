@@ -182,8 +182,6 @@ public class OmniTaskWrapper {
         try {
             ObjectMapper mapper = new ObjectMapper();
             JsonNode rootNode = mapper.readTree(metaStateHandleStr);
-            String jstateHandleId = rootNode.get("stateHandleId").get("keyString").asText();
-
             List<HandleAndLocalPath> sharedState = new ArrayList<>();
             JsonNode sharedStateNode = rootNode.get("sharedState").get(1);
             for (JsonNode stateNode : sharedStateNode) {
@@ -208,6 +206,7 @@ public class OmniTaskWrapper {
             long persistedSizeOfThisCheckpoint = rootNode.get("persistedSizeOfThisCheckpoint").asLong();
             StreamStateHandle metaDataState =
                     TaskStateSnapshotDeser.parseStreamStateHandle(rootNode.get("metaDataState"));
+            String jstateHandleId = rootNode.get("stateHandleId").get("keyString").asText();
             StateHandleID stateHandleId = new StateHandleID(jstateHandleId);
 
             return IncrementalRemoteKeyedStateHandle.restore(
@@ -223,8 +222,8 @@ public class OmniTaskWrapper {
             throw ex;
         } catch (Exception e) {
             throw new JsonHelper.JsonHelperException(
-                    "Error deserializing metaStateHandleStr to IncrementalRemoteKeyedStateHandle: " +
-                            metaStateHandleStr, e);
+                    "Error deserializing metaStateHandleStr to IncrementalRemoteKeyedStateHandle: "
+                            + metaStateHandleStr, e);
         }
     }
 

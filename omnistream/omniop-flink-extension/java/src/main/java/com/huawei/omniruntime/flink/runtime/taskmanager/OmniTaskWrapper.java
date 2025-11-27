@@ -12,12 +12,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.runtime.checkpoint.CheckpointFailureReason;
-import org.apache.flink.runtime.state.DirectoryStateHandle;
-import org.apache.flink.runtime.state.KeyGroupRange;
-import org.apache.flink.runtime.state.KeyedBackendSerializationProxy;
-import org.apache.flink.runtime.state.SnapshotResult;
-import org.apache.flink.runtime.state.StreamStateHandle;
-import org.apache.flink.runtime.state.IncrementalLocalKeyedStateHandle;
+import org.apache.flink.runtime.state.*;
 import org.apache.flink.runtime.state.IncrementalKeyedStateHandle.HandleAndLocalPath;
 import org.apache.flink.runtime.state.metainfo.StateMetaInfoSnapshot;
 import org.apache.flink.runtime.taskmanager.RuntimeEnvironment;
@@ -177,18 +172,73 @@ public class OmniTaskWrapper {
         }
     }
 
+    private IncrementalRemoteKeyedStateHandle deserializeIncrementalRemoteKeyedStateHandle(String metaStateHandleStr) {
+        try {
+            ObjectMapper mapper = new ObjectMapper();
+
+            JsonNode rootNode = mapper.readTree(metaStateHandleStr);
+            UUID backendIdentifier = UUID.fromString(rootNode.get("backendIdentifier").asText());
+            long checkpointId = rootNode.get("checkpointId").asLong();
+            KeyGroupRange keyGroupRange = JsonHelper.fromJson(rootNode.get("keyGroupRange").toString(), KeyGroupRange.class);
+            long persistedSizeOfThisCheckpoint = rootNode.get("persistedSizeOfThisCheckpoint").asLong();
+            String jstateHandleId = rootNode.get("stateHandleId").get("keyString").asText();
+            StateHandleID stateHandleId = new StateHandleID(jstateHandleId);
+
+            StreamStateHandle metaDataState = TaskStateSnapshotDeser.parseStreamStateHandle(rootNode.get("metaDataState"));
+
+            List<HandleAndLocalPath> sharedState = new ArrayList<>();
+            JsonNode sharedStateNode = rootNode.get("sharedState").get(1);
+            for (JsonNode stateNode : sharedStateNode) {
+                String localPath = stateNode.get("localPath").asText();
+                StreamStateHandle handle = TaskStateSnapshotDeser.parseStreamStateHandle(stateNode.get("handle"));
+                sharedState.add(HandleAndLocalPath.of(handle, localPath));
+            }
+
+            List<HandleAndLocalPath> privateState = new ArrayList<>();
+            JsonNode privateStateNode = rootNode.get("privateState").get(1);
+            for (JsonNode stateNode : privateStateNode) {
+                String localPath = stateNode.get("localPath").asText();
+                StreamStateHandle handle = TaskStateSnapshotDeser.parseStreamStateHandle(stateNode.get("handle"));
+                privateState.add(HandleAndLocalPath.of(handle, localPath));
+            }
+
+            return IncrementalRemoteKeyedStateHandle.restore(
+                        backendIdentifier,
+                        keyGroupRange,
+                        checkpointId,
+                        sharedState,
+                        privateState,
+                        metaDataState,
+                        persistedSizeOfThisCheckpoint,
+                        stateHandleId);
+        } catch (Exception e) {
+            throw new JsonHelper.JsonHelperException(
+                    "Error deserializing metaStateHandleStr to IncrementalRemoteKeyedStateHandle: " + metaStateHandleStr, e);
+        }
+    }
+
     // This function is for C++ calling readMetaData in RocksDBIncrementalRestoreOperation
     public <K> String readMetaData(String metaStateHandleStr) throws IOException {
         // Reconstruct a IncrementalLocalStateHandle
-        IncrementalLocalKeyedStateHandle localKeyedStateHandle =
-                deserializeIncrementalLocalKeyedStateHandle(metaStateHandleStr);
+        StreamStateHandle metaStateHandle = null;
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode rootNode = mapper.readTree(metaStateHandleStr);
+        String classType = rootNode.get("@class").asText();
+        if (classType.equals("org.apache.flink.runtime.state.IncrementalLocalKeyedStateHandle")) {
+            IncrementalLocalKeyedStateHandle localKeyedStateHandle =
+                    deserializeIncrementalLocalKeyedStateHandle(metaStateHandleStr);
+            metaStateHandle = localKeyedStateHandle.getMetaDataState();
+        } else if (classType.equals("org.apache.flink.runtime.state.IncrementalRemoteKeyedStateHandle")) {
+            IncrementalRemoteKeyedStateHandle remoteKeyedStateHandle =
+                    deserializeIncrementalRemoteKeyedStateHandle(metaStateHandleStr);
+            metaStateHandle = remoteKeyedStateHandle.getMetaStateHandle();
+        } else {
+            throw new IOException("Unsupported metaStateHandleStr json.");
+        }
+
         RuntimeEnvironment env = omniTask.checkpointingEnv;
-
         ClassLoader userCodeClassLoader = env.getUserCodeClassLoader().asClassLoader();
-
-        StreamStateHandle metaStateHandle = localKeyedStateHandle.getMetaDataState();
         InputStream inputStream = null;
-
         CloseableRegistry cancelStreamRegistry = new CloseableRegistry();
         try {
             // The readMetaData function

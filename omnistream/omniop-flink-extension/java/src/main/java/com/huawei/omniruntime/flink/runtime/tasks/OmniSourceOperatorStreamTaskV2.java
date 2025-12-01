@@ -268,7 +268,9 @@ public class OmniSourceOperatorStreamTaskV2<T> extends OmniStreamTask<T, SourceO
             CheckpointMetaData checkpointMetaData,
             CheckpointOptions checkpointOptions,
             CompletableFuture<Boolean> triggerFuture) {
-        assert (mailboxProcessor.isMailboxThread());
+        if (!mailboxProcessor.isMailboxThread()) {
+            throw new IllegalStateException("mailboxProcessor is not MailboxThread");
+        }
         if (!triggeredCheckpoints.remove(checkpointMetaData.getCheckpointId())) {
             // common case: RPC is received before source reader triggers checkpoint
             // store metadata and options for later
@@ -372,7 +374,9 @@ public class OmniSourceOperatorStreamTaskV2<T> extends OmniStreamTask<T, SourceO
      * checkpoint X is only removed when both RPC and trigger for a checkpoint Y>X is received.
      */
     private void cleanupOldCheckpoints(long checkpointId) {
-        assert (mailboxProcessor.isMailboxThread());
+        if (!mailboxProcessor.isMailboxThread()) {
+            throw new IllegalStateException("mailboxProcessor is not MailboxThread");
+        }
         triggeredCheckpoints.headSet(checkpointId).clear();
         untriggeredCheckpoints.headMap(checkpointId).clear();
 
@@ -381,7 +385,9 @@ public class OmniSourceOperatorStreamTaskV2<T> extends OmniStreamTask<T, SourceO
 
     /** Resumes processing if it was blocked before or else is a no-op. */
     private void maybeResumeProcessing() {
-        assert (mailboxProcessor.isMailboxThread());
+        if (!mailboxProcessor.isMailboxThread()) {
+            throw new IllegalStateException("mailboxProcessor is not MailboxThread");
+        }
 
         if (triggeredCheckpoints.isEmpty()) {
             waitForRPC.complete(null);
@@ -390,7 +396,9 @@ public class OmniSourceOperatorStreamTaskV2<T> extends OmniStreamTask<T, SourceO
 
     /** Remove temporary data about a canceled checkpoint. */
     private void cleanupCheckpoint(long checkpointId) {
-        assert (mailboxProcessor.isMailboxThread());
+        if (!mailboxProcessor.isMailboxThread()) {
+            throw new IllegalStateException("mailboxProcessor is not MailboxThread");
+        }
         triggeredCheckpoints.remove(checkpointId);
         untriggeredCheckpoints.remove(checkpointId);
 

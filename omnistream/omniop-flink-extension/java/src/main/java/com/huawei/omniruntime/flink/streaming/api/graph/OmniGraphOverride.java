@@ -139,9 +139,7 @@ public final class OmniGraphOverride {
                     "LookupJoin",
                     "WatermarkAssigner",
                     "StreamRecordTimestampInserter",
-                    "ConstraintEnforcer",
-                    "GroupAggregate",
-                    "Deduplicate"));
+                    "ConstraintEnforcer"));
         } else {
             SUPPORT_OP_NAME.addAll(Arrays.asList(
                     "Calc",

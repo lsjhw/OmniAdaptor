@@ -1029,12 +1029,11 @@ public class OmniTask extends Task {
         final CheckpointedStateScope stateScope = CheckpointedStateScope.SHARED;
 
         List<HandleAndLocalPath> handles = new ArrayList<>();
-        try {
+        try (RocksDBStateUploader uploader = new RocksDBStateUploader(numberOfSnapshottingThreads)) {
             if (paths == null || paths.isEmpty()) {
                 return Collections.emptyList();
             }
-    
-            RocksDBStateUploader uploader = new RocksDBStateUploader(numberOfSnapshottingThreads);
+
             handles =
                     uploader.uploadFilesToCheckpointFs(
                             paths,
@@ -1045,6 +1044,9 @@ public class OmniTask extends Task {
             LOG.info("Checkpoint files uploaded");
         } catch (Throwable t) {
             LOG.info("Error closing registry", t);
+        } finally {
+            snapshotCloseableRegistry.close();
+            tmpResourcesRegistry.close();
         }
         return handles;
     }

@@ -68,9 +68,15 @@ public class OneInputStreamTask<IN, OUT> extends StreamTask<OUT, OneInputStreamO
 
     public static boolean OMNI_BATCH_MODE = false;
 
-    private static final int BATCH_SIZE = 1000;
+    private static int batchSize = 10000;
 
-    private static final int BATCH_SIZE_OPTIMIZATION = 25000;
+    private static int batchSizeOptimization = 5500;
+
+    private static final int BATCH_SIZE_SMALL_PARRA = 10000;
+
+    private static final int BATCH_SIZE_OPTIMIZATION_SMALL_PARRA = 6000;
+
+    private static final int SMALL_PARRA = 2;
 
     /**
      * Constructor for initialization, possibly with initial state (recovery / savepoint / etc).
@@ -133,6 +139,11 @@ public class OneInputStreamTask<IN, OUT> extends StreamTask<OUT, OneInputStreamO
                 .getMetricGroup()
                 .gauge(MetricNames.IO_CURRENT_INPUT_WATERMARK, inputWatermarkGauge::getValue);
         OMNI_BATCH_MODE = configuration.getOmniBatchMode();
+        int parallelism = getEnvironment().getExecutionConfig().getParallelism();
+        if (parallelism == SMALL_PARRA) {
+            batchSize = BATCH_SIZE_SMALL_PARRA;
+            batchSizeOptimization = BATCH_SIZE_OPTIMIZATION_SMALL_PARRA;
+        }
     }
 
     @Override
@@ -244,8 +255,8 @@ public class OneInputStreamTask<IN, OUT> extends StreamTask<OUT, OneInputStreamO
             operator.setKeyContextElement(record);
             if (OMNI_BATCH_MODE && isSink) {
                 count++;
-                if (count == BATCH_SIZE) {
-                    for (int i = 0; i < BATCH_SIZE_OPTIMIZATION; i++) {
+                if (count == batchSize) {
+                    for (int i = 0; i < batchSizeOptimization; i++) {
                         operator.processElement(record);
                     }
                     count = 0;

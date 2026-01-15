@@ -5,9 +5,42 @@ set -ex
 # 获取脚本所在目录的绝对路径
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
+# 检测系统架构（只识别x86和arm）
+get_architecture() {
+    local arch
+    arch=$(uname -m)
+
+    # 转换为小写方便匹配
+    arch_lower=$(echo "$arch" | tr '[:upper:]' '[:lower:]')
+
+    # 判断是否为x86架构
+    case "$arch_lower" in
+        x86_64|amd64|i386|i686|x64)
+            echo "x86"
+            return 0
+            ;;
+    esac
+
+    # 判断是否为arm架构
+    case "$arch_lower" in
+        aarch64|arm64|armv7l|armv8l|armhf|arm)
+            echo "arm"
+            return 0
+            ;;
+    esac
+
+    # 默认返回原始架构名
+    echo "$arch"
+    return 1
+}
+
+
+# 获取架构信息
+ARCH=$(get_architecture)
+
 # 使用绝对路径
 pyinstaller --onefile \
-            --name omnihelper \
+            --name "omnihelper_${ARCH}" \
             --distpath "${SCRIPT_DIR}/dist" \
             --workpath "${SCRIPT_DIR}/build" \
             --specpath "${SCRIPT_DIR}" \
@@ -36,6 +69,6 @@ dist_dir="${SCRIPT_DIR}/dist"
 
 cd "$dist_dir" || exit 1
 
-tar -czf "${SCRIPT_DIR}/${archive_name}.tar.gz" .
+tar -czf "${SCRIPT_DIR}/${archive_name}_${ARCH}.tar.gz" .
 
-echo "打包完成：${SCRIPT_DIR}/${archive_name}.tar.gz"
+echo "打包完成：${SCRIPT_DIR}/${archive_name}_${ARCH}.tar.gz"

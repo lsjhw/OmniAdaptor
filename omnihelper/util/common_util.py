@@ -21,26 +21,6 @@ class CommonUtil:
         return os.path.dirname(__file__)
 
     @staticmethod
-    def get_architecture():
-        """获取当前系统的 CPU 架构"""
-        arch = platform.machine().lower()
-
-        # x86 架构
-        x86_architectures = ['x86_64', 'amd64', 'i386', 'i686', 'x64', 'x86']
-        for x86_arch in x86_architectures:
-            if x86_arch in arch:
-                return True, "x86"
-
-        # ARM 架构
-        arm_architectures = ['aarch64', 'arm64', 'armv7l', 'armv8l', 'armhf', 'arm']
-        for arm_arch in arm_architectures:
-            if arm_arch in arch:
-                return True, "arm"
-
-        # 其他架构
-        return False, arch
-
-    @staticmethod
     def print_failed_files(failed_files, all_files_length):
         # 统一展示失败结果
         if failed_files:

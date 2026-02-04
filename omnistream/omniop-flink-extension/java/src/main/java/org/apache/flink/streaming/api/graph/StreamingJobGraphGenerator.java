@@ -645,12 +645,10 @@ public class StreamingJobGraphGenerator {
         CheckpointConfigPOJO checkpointConfigPOJO = new CheckpointConfigPOJO(streamGraph.getConfiguration(), streamGraph);
         ExecutionCheckpointConfigPOJO executionCheckpointConfigPOJO =
                 new ExecutionCheckpointConfigPOJO(streamGraph.getCheckpointConfig(), streamGraph.getConfiguration());
-        boolean incrementalCheckpoints = checkpointConfigPOJO.getIncrementalCheckpoints();
         CheckpointingMode chkMode = streamGraph.getCheckpointConfig().getCheckpointingMode();
         boolean unalignedCheckpointsEnabled = streamGraph.getCheckpointConfig().isUnalignedCheckpointsEnabled();
         String path = streamGraph.getConfiguration().get(CheckpointingOptions.SAVEPOINT_DIRECTORY);
-        boolean useOmni = incrementalCheckpoints
-                && chkMode == CheckpointingMode.EXACTLY_ONCE
+        boolean useOmni = chkMode == CheckpointingMode.EXACTLY_ONCE
                 && !unalignedCheckpointsEnabled
                 && StringUtils.isEmpty(path);
         if (!useOmni) {

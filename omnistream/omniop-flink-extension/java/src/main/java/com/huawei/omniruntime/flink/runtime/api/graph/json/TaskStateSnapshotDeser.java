@@ -67,7 +67,7 @@ import java.io.IOException;
  */
 public class TaskStateSnapshotDeser {
 
-    private static final Logger LOG = LoggerFactory.getLogger(TaskStateManagerWrapper.class);
+    private static final Logger LOG = LoggerFactory.getLogger(TaskStateSnapshotDeser.class);
 
     private static final  ObjectMapper MAPPER = new ObjectMapper();
 

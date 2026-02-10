@@ -426,10 +426,6 @@ public class OmniTaskWrapper {
             LOG.error("Error deserialize failed, length < 0");
             throw new IndexOutOfBoundsException();
         }
-        if (length > 4 * 1024 * 1024) {
-            LOG.error("Error deserialize failed, length > 4M");
-            throw new IndexOutOfBoundsException();
-        }
         int[] result = new int[length];
         for (int i = 0; i < length; i++) {
             result[i] = source.readByte();

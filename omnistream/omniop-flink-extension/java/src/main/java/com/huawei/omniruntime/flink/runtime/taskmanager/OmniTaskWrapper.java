@@ -40,6 +40,8 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.core.io.VersionMismatchException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import static org.apache.flink.runtime.state.FullSnapshotUtil.END_OF_KEY_GROUP_MARK;
 import static org.apache.flink.runtime.state.FullSnapshotUtil.FIRST_BIT_IN_BYTE_MASK;
@@ -56,9 +58,14 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 public class OmniTaskWrapper {
+
+    private static final Logger LOG = LoggerFactory.getLogger(OmniTaskWrapper.class);
+
     OmniTask omniTask;
 
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    private static final int[] versions = new int[] {6, 5, 4, 3, 2, 1}; 
 
     public OmniTaskWrapper(OmniTask omniTask) {
         this.omniTask = omniTask;
@@ -298,8 +305,7 @@ public class OmniTaskWrapper {
 
     private KeyGroupsStateHandle deserializeKeyGroupsStateHandle(String metaStateHandleStr) {
         try {
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode rootNode = mapper.readTree(metaStateHandleStr);
+            JsonNode rootNode = OBJECT_MAPPER.readTree(metaStateHandleStr);
             KeyGroupRange keyGroupRange = JsonHelper.fromJson(
                     rootNode.get("keyGroupRange").toString(),
                     KeyGroupRange.class);
@@ -316,11 +322,11 @@ public class OmniTaskWrapper {
                     keyGroupRangeOffsets,
                     metaDataState,
                     stateHandleId);
-        } catch (JsonHelper.JsonHelperException ex) {
-            throw ex;
         } catch (Exception e) {
+            LOG.error("Error deserializing metaStateHandleStr to KeyGroupsStateHandle: metaStateHandleStr={}, exception={}",
+                metaStateHandleStr, e.getMessage());
             throw new JsonHelper.JsonHelperException(
-                    "Error deserializing metaStateHandleStr to KeyGroupsStateHandle: "
+                    "Error deserializing metaStateHandleStr to IncrementalRemoteKeyedStateHandle: "
                             + metaStateHandleStr, e);
         }
     }
@@ -374,7 +380,14 @@ public class OmniTaskWrapper {
     public FSDataInputStream getSavepointInputStream(String metaStateHandleStr) throws IOException {
         KeyGroupsStateHandle keyedGroupsStateHandle = deserializeKeyGroupsStateHandle(metaStateHandleStr);
         StreamStateHandle metaStateHandle = keyedGroupsStateHandle.getDelegateStateHandle();
+        if (null == metaStateHandle) {
+            LOG.error("Error getSavepointInputStream: metaStateHandleStr:{}", metaStateHandleStr);
+            return null;
+        }
         FSDataInputStream inputStream = metaStateHandle.openInputStream();
+        if (null == inputStream) {
+            LOG.error("Error getSavepointInputStream: metaStateHandleStr:{}", metaStateHandleStr);
+        }
         return inputStream;
     }
 
@@ -391,7 +404,6 @@ public class OmniTaskWrapper {
     }
 
     public boolean isUsingKeyGroupCompression(FSDataInputStream inputStream) throws IOException {
-        int[] versions = new int[] {6, 5, 4, 3, 2, 1}; 
         DataInputView in = new DataInputViewStreamWrapper(inputStream);
         int readVersion = in.readInt();
         for (int version : versions) {
@@ -403,16 +415,22 @@ public class OmniTaskWrapper {
                 }
             }
         }
+        LOG.error("Incompatible version: found " + readVersion + ", compatible version are" + Arrays.toString(versions));
         throw new VersionMismatchException("Incompatible version: found " + readVersion
             + ", compatible version are" + Arrays.toString(versions));
     }
 
     private int[] deserialize(DataInputView source) throws IOException {
         int length = source.readInt();
-        int[] result = new int[length];
         if (length < 0) {
+            LOG.error("Error deserialize failed, length < 0");
             throw new IndexOutOfBoundsException();
         }
+        if (length > 4 * 1024 * 1024) {
+            LOG.error("Error deserialize failed, length > 4M");
+            throw new IndexOutOfBoundsException();
+        }
+        int[] result = new int[length];
         for (int i = 0; i < length; i++) {
             result[i] = source.readByte();
         }
@@ -431,13 +449,15 @@ public class OmniTaskWrapper {
         }
         int entryStateId = currentKvStateId;
         int count = 0;
-        List<KeyGroupEntry> keyGroupEntries = new ArrayList();
+        List<KeyGroupEntry> keyGroupEntries = new ArrayList(1000);
         // read by state or by count 1000
         while (count < 1000) {
             count++;
             int[] key = deserialize(kgInputView);
             int[] value = deserialize(kgInputView);
+            // 通过 key[0] & FIRST_BIT_IN_BYTE_MASK 可以判断是否应该读取下一个kvStateId的数据；
             if (0 != ((byte)key[0] & FIRST_BIT_IN_BYTE_MASK)) {
+                // 清除key[0] 的标识信息
                 key[0] = (byte)key[0] & ~FIRST_BIT_IN_BYTE_MASK;
                 currentKvStateId = END_OF_KEY_GROUP_MARK & kgInputView.readShort();
                 keyGroupEntries.add(new KeyGroupEntry(entryStateId, key, value));

@@ -5,6 +5,9 @@ set -ex
 # 获取脚本所在目录的绝对路径
 SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
+# 构建 Spark log-parser
+bash "${SCRIPT_DIR}/omnimv-spark-extension/build.sh"
+
 # 检测系统架构（只识别x86和arm）
 get_architecture() {
     local arch

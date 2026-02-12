@@ -174,14 +174,14 @@ class TypeMatcher:
 
     @staticmethod
     def replace_predicate_partition(args):
-        left, right = args
-        if left in NOT_SUPPORTED_TYPE and right in NOT_SUPPORTED_TYPE:
+        supported = None
+        for arg in args:
+            if arg not in NOT_SUPPORTED_TYPE:
+                supported = arg
+                break
+        if supported is None:
             return args
-        if left in NOT_SUPPORTED_TYPE:
-            return [right, right]
-        if right in NOT_SUPPORTED_TYPE:
-            return [left, left]
-        return args
+        return [supported] * len(args)
 
     @staticmethod
     def is_pure_cast(expr):

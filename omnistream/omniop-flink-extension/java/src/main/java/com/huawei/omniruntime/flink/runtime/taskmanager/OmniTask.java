@@ -570,7 +570,6 @@ public class OmniTask extends Task {
 
             // create RemoteDataFetcher for remote input channelsE
 
-            originalTaskDataFetcher = createAndStartRemoteDataFetcher(inputGates);
 
             if (!transitionState(ExecutionState.INITIALIZING, ExecutionState.RUNNING)) {
                 throw new CancelTaskException();
@@ -578,6 +577,9 @@ public class OmniTask extends Task {
             taskManagerActions.updateTaskExecutionState(new TaskExecutionState(executionId, ExecutionState.RUNNING));
             // call native restore and invoke before java
             long status = doRunRestoreNativeTask(nativeTaskRef, nativeStreamTask);
+            LOG.error("begin createAndStartRemoteDataFetcher ");
+            originalTaskDataFetcher = createAndStartRemoteDataFetcher(inputGates);
+            LOG.error("end createAndStartRemoteDataFetcher ");
             registerEventDispatcher((StreamTask<?, ?>) invokable);
             status = doRunInvokeNativeTask(nativeTaskRef, nativeStreamTask);
         } else {

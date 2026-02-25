@@ -9,15 +9,20 @@ import com.huawei.omniruntime.flink.runtime.api.graph.json.TaskStateSnapshotDese
 import com.huawei.omniruntime.flink.runtime.restore.KeyGroupEntry;
 import com.huawei.omniruntime.flink.runtime.restore.KeyGroupEntryWrapper;
 
+import org.apache.flink.core.execution.SavepointFormatType;
 import org.apache.flink.core.fs.CloseableRegistry;
 import org.apache.flink.core.fs.FSDataInputStream;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataInputViewStreamWrapper;
+import org.apache.flink.runtime.checkpoint.SnapshotType;
+import org.apache.flink.runtime.checkpoint.SavepointType;
+import org.apache.flink.runtime.checkpoint.CheckpointOptions;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.state.LocalRecoveryConfig;
 import org.apache.flink.runtime.state.LocalRecoveryDirectoryProvider;
 import org.apache.flink.runtime.state.LocalRecoveryDirectoryProviderImpl;
+import org.apache.flink.runtime.state.CheckpointStorageLocationReference;
 import org.apache.flink.runtime.checkpoint.CheckpointFailureReason;
 import org.apache.flink.runtime.state.DirectoryStateHandle;
 import org.apache.flink.runtime.state.KeyGroupRange;
@@ -49,6 +54,7 @@ import static org.apache.flink.runtime.state.FullSnapshotUtil.FIRST_BIT_IN_BYTE_
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -123,7 +129,65 @@ public class OmniTaskWrapper {
         return new RuntimeException(msg);
     }
 
-    public SnapshotResult<StreamStateHandle> materializeMetaData(long checkpointId, String stateMetaInfoSnapshotsJson, String localRecoveryConfigStr) throws IOException {
+    private CheckpointOptions parseCheckpointOptions(String checkpointOptionStr) throws Exception{
+        JsonNode root = OBJECT_MAPPER.readTree(checkpointOptionStr);
+
+        long alignedCheckpointTimeout =  root.get("alignedCheckpointTimeout").longValue();
+
+        boolean isExactlyOnceMode = false;
+        boolean isUnalignedEnabled = false;
+        String alignmentType =  root.get("alignmentType").textValue();
+        if (alignmentType == null || alignmentType.isEmpty()){
+            throw new IllegalArgumentException("alignmentType is required");
+        }
+        if (alignmentType.equals(CheckpointOptions.AlignmentType.AT_LEAST_ONCE.name())) {
+            isExactlyOnceMode = true;
+        } else if (alignmentType.equals(CheckpointOptions.AlignmentType.UNALIGNED.name())) {
+            isUnalignedEnabled = true;
+        }
+        JsonNode checkpointTypeNode =  root.get("checkpointType");
+        if (checkpointTypeNode == null){
+            throw new IllegalArgumentException("Missing required field: checkpointType");
+        }
+        SnapshotType type;
+        String name = checkpointTypeNode.get("name").textValue();
+        if (name == null){
+            throw new IllegalArgumentException("Missing required field: checkpointType name");
+        }
+        CheckpointOptions options;
+        if (name.contains("Checkpoint")){
+            options = CheckpointOptions.forCheckpointWithDefaultLocation();
+        } else {
+            int formatType = checkpointTypeNode.get("formatType").intValue();
+            if (name.equals("Savepoint")) {
+                type = formatType == 0 ? SavepointType.savepoint(SavepointFormatType.CANONICAL) : SavepointType.savepoint(SavepointFormatType.NATIVE);
+            } else if (name.equals("Terminate Savepoint")){
+                type = formatType == 0 ? SavepointType.terminate(SavepointFormatType.CANONICAL) : SavepointType.terminate(SavepointFormatType.NATIVE);
+            } else {
+                type = formatType == 0 ? SavepointType.suspend(SavepointFormatType.CANONICAL) : SavepointType.suspend(SavepointFormatType.NATIVE);
+            }
+            JsonNode targetLocationNode = root.get("targetLocation");
+            if (targetLocationNode == null){
+                throw new IllegalArgumentException("Missing required field: targetLocation");
+            }
+            String referenceBytesStr = targetLocationNode.get("referenceBytes").textValue();
+            if (referenceBytesStr == null || referenceBytesStr.isEmpty()){
+                throw new IllegalArgumentException("targetLocation.referenceBytes is required");
+            }
+            CheckpointStorageLocationReference locationReference = new CheckpointStorageLocationReference(referenceBytesStr.getBytes(StandardCharsets.UTF_8));
+
+            options = CheckpointOptions.forConfig(
+                    type,
+                    locationReference,
+                    isExactlyOnceMode,
+                    isUnalignedEnabled,
+                    alignedCheckpointTimeout);
+        }
+        return options;
+    }
+
+    public SnapshotResult<StreamStateHandle> materializeMetaData(long checkpointId, String stateMetaInfoSnapshotsJson,
+                                                                 String localRecoveryConfigStr, String checkpointOptionStr) throws IOException {
         List<Map<String, Object>> stateMetaInfoMaps =
                 OBJECT_MAPPER.readValue(stateMetaInfoSnapshotsJson, new TypeReference<List<Map<String, Object>>>() {});
 
@@ -162,14 +226,14 @@ public class OmniTaskWrapper {
         }
 
         try {
-            return omniTask.materializeMetaData(checkpointId, stateMetaInfoSnapshots, recoveryConfig);
+            return omniTask.materializeMetaData(checkpointId, stateMetaInfoSnapshots, recoveryConfig, parseCheckpointOptions(checkpointOptionStr));
         } catch (Exception e) {
             throw new IOException("Failed to materialize metadata", e);
         }
     }
 
-    public CheckpointStreamWithResultProvider acquireSavepointOutputStream(long checkpointId) throws Exception {
-        return omniTask.acquireSavepointOutputStream(checkpointId);
+    public CheckpointStreamWithResultProvider acquireSavepointOutputStream(long checkpointId, String checkpointOptionStr) throws Exception {
+        return omniTask.acquireSavepointOutputStream(checkpointId, parseCheckpointOptions(checkpointOptionStr));
     }
 
     public SnapshotResult<StreamStateHandle> closeSavepointOutputStream(CheckpointStreamWithResultProvider provider) throws Exception {

@@ -969,14 +969,12 @@ public class OmniTask extends Task {
 
     public SnapshotResult<StreamStateHandle> materializeMetaData(
             final long checkpointId,
-            final List<StateMetaInfoSnapshot> stateMetaInfoSnapshots, final LocalRecoveryConfig localRecoveryConfig)
+            final List<StateMetaInfoSnapshot> stateMetaInfoSnapshots,
+            final LocalRecoveryConfig localRecoveryConfig,
+            final CheckpointOptions checkpointOptions
+    )
             throws Exception {
-        
-        if (this.checkpointOptions == null) {
-            LOG.info("checkpointOptions not initialized, using default location");
-            this.checkpointOptions = CheckpointOptions.forCheckpointWithDefaultLocation();
-        }
-        
+        this.checkpointOptions = checkpointOptions;
         final CloseableRegistry snapshotCloseableRegistry = new CloseableRegistry();
         final CloseableRegistry tmpResourcesRegistry = new CloseableRegistry();
 
@@ -1051,10 +1049,10 @@ public class OmniTask extends Task {
                             tmpResourcesRegistry);
             LOG.info("Checkpoint files uploaded");
         } catch (Throwable t) {
+            tmpResourcesRegistry.close();
             LOG.info("Error closing registry", t);
         } finally {
             snapshotCloseableRegistry.close();
-            tmpResourcesRegistry.close();
         }
         return handles;
     }
@@ -1229,11 +1227,8 @@ public class OmniTask extends Task {
         return result;
     }
 
-    public CheckpointStreamWithResultProvider acquireSavepointOutputStream(long checkpointId) throws Exception {
-        if (this.checkpointOptions == null) {
-            LOG.info("checkpointOptions not initialized, using default location");
-            this.checkpointOptions = CheckpointOptions.forCheckpointWithDefaultLocation();
-        }
+    public CheckpointStreamWithResultProvider acquireSavepointOutputStream(long checkpointId, CheckpointOptions checkpointOptions) throws Exception {
+        this.checkpointOptions = checkpointOptions;
         final CheckpointStorageAccess checkpointAccess = ((StreamTask<?, ?>) this.invokable).getEnvironment().getCheckpointStorageAccess();
         this.checkpointStreamFactory = checkpointAccess.resolveCheckpointStorageLocation(checkpointId, this.checkpointOptions.getTargetLocation());
         return CheckpointStreamWithResultProvider.createSimpleStream(

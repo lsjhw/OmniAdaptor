@@ -355,6 +355,9 @@ public class OmniCreditBasedSequenceNumberingViewReader
         if (bufferInfos.size() > 0) {
             flushed = false;
             BufferInfo bufferInfo = bufferInfos.remove(0);
+            if (bufferInfo.networkBuffer.isBuffer() && --numCreditsAvailable < 0) {
+                throw new IllegalStateException("no credit available");
+            }
             Buffer.DataType nextDataType = bufferInfos.size() > 0 ? Buffer.DataType.DATA_BUFFER : Buffer.DataType.NONE;
 
             return new InputChannel.BufferAndAvailability(

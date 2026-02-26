@@ -9,6 +9,7 @@ import com.huawei.omniruntime.flink.runtime.api.state.serializer.factory.parse.O
 import com.huawei.omniruntime.flink.runtime.api.state.serializer.model.info.OmniNativeSerializerJsonInfo;
 import com.huawei.omniruntime.flink.runtime.api.state.serializer.model.info.OmniSerializerJsonInfo;
 import com.huawei.omniruntime.flink.runtime.api.state.serializer.model.info.OmniStateMetaSerializerInfo;
+import com.huawei.omniruntime.flink.runtime.metrics.exception.GeneralRuntimeException;
 import com.huawei.omniruntime.flink.utils.ReflectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.api.common.ExecutionConfig;
@@ -124,7 +125,7 @@ public class OmniStateSerializerHelper {
         } catch (Exception e) {
             LOG.error("method : buildSerializerInfo -> taskKey : {}, stateTableName : {}, exception",
                     taskKey, stateTableName, e);
-            throw new RuntimeException(e);
+            throw new GeneralRuntimeException(e);
         }
     }
 
@@ -179,7 +180,7 @@ public class OmniStateSerializerHelper {
         } catch (Exception e) {
             LOG.error("method : buildStateDescriptor -> taskKey : {}, stateTableName : {}, key : {}, exception",
                     taskKey, stateTableName, key, e);
-            throw new RuntimeException(e);
+            throw new GeneralRuntimeException(e);
         }
     }
 
@@ -204,17 +205,17 @@ public class OmniStateSerializerHelper {
         Map<String, Object> map = JsonHelper.fromJson(jsonStr, new TypeReference<Map<String, Object>>() {
         });
         if (null == map) {
-            throw new RuntimeException(String.format("jsonStr : %s convert fail.", jsonStr));
+            throw new GeneralRuntimeException(String.format("jsonStr : %s convert fail.", jsonStr));
         }
 
         if (null == map.get(OmniSerializerJson.TYPE.getKey())) {
-            throw new RuntimeException(String.format("%s is null.", OmniSerializerJson.TYPE.getKey()));
+            throw new GeneralRuntimeException(String.format("%s is null.", OmniSerializerJson.TYPE.getKey()));
         }
         info.setType((Integer) map.get(OmniSerializerJson.TYPE.getKey()));
 
         OmniSerializerType serializerType = OmniSerializerType.get(info.getType());
         if (null == serializerType) {
-            throw new RuntimeException(String.format("type : %s undefined.", info.getType()));
+            throw new GeneralRuntimeException(String.format("type : %s undefined.", info.getType()));
         }
         info.setSerializerType(serializerType);
 
@@ -225,7 +226,7 @@ public class OmniStateSerializerHelper {
                 try {
                     info.setElementTypeClazz(Class.forName(info.getElementType(), false, userCodeClassLoader));
                 } catch (ClassNotFoundException e) {
-                    throw new RuntimeException(String.format("Could not find class '%s' for unsafe operations.", info.getElementType()), e);
+                    throw new GeneralRuntimeException(String.format("Could not find class '%s' for unsafe operations.", info.getElementType()), e);
                 }
             }
         }
@@ -307,7 +308,7 @@ public class OmniStateSerializerHelper {
             return metaInfoGroup;
         } catch (Exception e) {
             LOG.error("method : buildSerializerJsonInfo -> exception", e);
-            throw new RuntimeException(e);
+            throw new GeneralRuntimeException(e);
         }
     }
 
@@ -336,7 +337,7 @@ public class OmniStateSerializerHelper {
             return factory.buildSerializerJsonBy(typeSerializer, serializerType);
         } catch (Exception e) {
             LOG.error("method : buildJsonInfo -> exception", e);
-            throw new RuntimeException(e);
+            throw new GeneralRuntimeException("buildSerializerInfo exception ; " + e.getMessage(), e);
         }
     }
 

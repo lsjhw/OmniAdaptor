@@ -3,7 +3,6 @@ package com.huawei.omniruntime.flink.runtime.api.state.serializer.consts;
 /**
  * CC
  *
- * @description char consts
  */
 public class CC {
     public static final char HYPHEN = '-';

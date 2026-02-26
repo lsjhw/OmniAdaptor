@@ -10,7 +10,6 @@ import org.slf4j.LoggerFactory;
 /**
  * OmniParseMapFactory
  *
- * @description omni map list factory
  */
 
 public class OmniParseMapFactory extends OmniParseFactory {

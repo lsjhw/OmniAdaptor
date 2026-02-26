@@ -968,18 +968,10 @@ public class OmniTask extends Task {
         triggerCheckpointCpp(nativeTaskRef,checkpointID,checkpointTimestamp,checkpointOptionsString);
     }
 
-    /**
-     * get checkpointing env
-     * @return runtimeEnvironment
-     */
     public RuntimeEnvironment getCheckpointingEnv() {
         return this.checkpointingEnv;
     }
 
-    /**
-     * get execution config
-     * @return executionConfig
-     */
     public ExecutionConfig getExecutionConfig() {
         StreamTask<?, ?> streamTask = (StreamTask<?, ?>) this.invokable;
         return Objects.requireNonNull(streamTask).getExecutionConfig();

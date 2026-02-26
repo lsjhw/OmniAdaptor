@@ -10,7 +10,6 @@ import java.util.List;
 /**
  * OmniSerializerJsonInfo
  *
- * @description omni serializer json info
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class OmniSerializerJsonInfo implements Serializable {

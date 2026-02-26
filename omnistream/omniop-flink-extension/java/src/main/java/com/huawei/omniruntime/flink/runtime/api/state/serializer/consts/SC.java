@@ -3,7 +3,6 @@ package com.huawei.omniruntime.flink.runtime.api.state.serializer.consts;
 /**
  * SC
  *
- * @description string consts
  */
 public class SC {
     public static final String EMPTY = "";

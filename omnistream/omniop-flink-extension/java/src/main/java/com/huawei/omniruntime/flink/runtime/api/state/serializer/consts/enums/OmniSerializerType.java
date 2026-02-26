@@ -14,7 +14,6 @@ import java.util.Date;
 /**
  * OmniSerializerType
  *
- * @description omni serializer type
  */
 public enum OmniSerializerType {
     VOID(OmniSerializerCategory.BASIC, Void.class, VoidSerializer.class, -1),
@@ -83,12 +82,6 @@ public enum OmniSerializerType {
         return OmniSerializerCategory.BASIC.equals(this.category);
     }
 
-    /**
-     * get by code
-     *
-     * @param code int
-     * @return OmniSerializerType
-     */
     public static OmniSerializerType get(int code) {
         for (OmniSerializerType item : OmniSerializerType.values()) {
             if (item.equals(code)) {
@@ -99,12 +92,6 @@ public enum OmniSerializerType {
         return null;
     }
 
-    /**
-     * get by name
-     *
-     * @param serializerClazz serializer clazz
-     * @return OmniSerializerType
-     */
     public static OmniSerializerType get(Class<?> serializerClazz) {
         if (null == serializerClazz) {
             return null;

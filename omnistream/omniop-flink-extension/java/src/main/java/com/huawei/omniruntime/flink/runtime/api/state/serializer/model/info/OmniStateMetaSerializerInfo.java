@@ -15,7 +15,6 @@ import java.util.Map;
 /**
  * OmniStateMetaSerializerInfo
  *
- * @description omni state meta serializer info
  */
 
 public class OmniStateMetaSerializerInfo implements Serializable {
@@ -80,20 +79,10 @@ public class OmniStateMetaSerializerInfo implements Serializable {
         return this.serializerSnapshotGroup.get(StateMetaInfoSnapshot.CommonSerializerKeys.VALUE_SERIALIZER.toString());
     }
 
-    /**
-     * build Builder
-     *
-     * @return Builder
-     */
     public synchronized static Builder builder() {
         return new Builder();
     }
 
-    /**
-     * copy shallow
-     *
-     * @return OmniStateMetaSerializerInfo
-     */
     public OmniStateMetaSerializerInfo copy() {
         return new Builder()
                 .backendStateType(this.backendStateType)
@@ -131,7 +120,6 @@ public class OmniStateMetaSerializerInfo implements Serializable {
     /**
      * Builder
      *
-     * @description OmniStateMetaSerializerInfo builder
      */
     public static class Builder implements Serializable {
         private static final long serialVersionUID = 3008370937836010927L;

@@ -4,6 +4,7 @@ import com.huawei.omniruntime.flink.runtime.api.state.serializer.consts.SC;
 import com.huawei.omniruntime.flink.runtime.api.state.serializer.consts.enums.OmniSerializerType;
 import com.huawei.omniruntime.flink.runtime.api.state.serializer.model.info.OmniNativeSerializerJsonInfo;
 import com.huawei.omniruntime.flink.runtime.api.state.serializer.model.info.OmniSerializerJsonInfo;
+import com.huawei.omniruntime.flink.runtime.metrics.exception.GeneralRuntimeException;
 import com.huawei.omniruntime.flink.utils.ReflectionUtils;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.api.common.state.StateDescriptor;
@@ -27,7 +28,6 @@ import java.util.List;
 /**
  * OmniParseFactory
  *
- * @description omni parse factory
  */
 
 public abstract class OmniParseFactory {
@@ -44,15 +44,8 @@ public abstract class OmniParseFactory {
     // recursion depth interval
     protected static final int DEPTH_INTERVAL = 1;
 
-    /**
-     * build
-     *
-     * @param serializerType serializer type
-     * @return OmniParseFactory
-     */
     public static OmniParseFactory build(OmniSerializerType serializerType) {
         if (null == serializerType) {
-            LOG.warn("method : build -> serializerType is null.");
             return null;
         }
         OmniParseFactory factory = null;
@@ -82,24 +75,11 @@ public abstract class OmniParseFactory {
         return factory;
     }
 
-    /**
-     * build type information by
-     *
-     * @param info  OmniNativeSerializerJsonInfo
-     * @param depth depth
-     * @return TypeInformation<?>
-     */
     protected TypeInformation<?> buildTypeInformationBy(OmniNativeSerializerJsonInfo info, int depth) {
         if (depth > DEPTH_MAX) {
-            LOG.warn("method : buildTypeInformationBy -> max recursion depth ({}) exceeded. Input may be malformed or malicious.", DEPTH_MAX);
-            return null;
+            throw new GeneralRuntimeException(String.format("max recursion depth (%s) exceeded. Input may be malformed or malicious.", DEPTH_MAX));
         }
-        if (null == info) {
-            LOG.warn("method : buildTypeInformationBy -> info is null.");
-            return null;
-        }
-        if (null == info.getSerializerType()) {
-            LOG.warn("method : buildTypeInformationBy -> serializerType is null.");
+        if (null == info || null == info.getSerializerType()) {
             return null;
         }
         if (info.getSerializerType().isBasic()) {
@@ -129,25 +109,11 @@ public abstract class OmniParseFactory {
         return null;
     }
 
-    /**
-     * build json info by
-     *
-     * @param typeSerializer type serializer
-     * @param serializerType serializer type
-     * @param depth          depth
-     * @return OmniSerializerJsonInfo
-     */
     protected OmniSerializerJsonInfo buildJsonInfoBy(TypeSerializer<?> typeSerializer, OmniSerializerType serializerType, int depth) {
         if (depth > DEPTH_MAX) {
-            LOG.warn("method : buildJsonInfoBy -> max recursion depth ({}) exceeded. Input may be malformed or malicious.", DEPTH_MAX);
-            return null;
+            throw new GeneralRuntimeException(String.format("max recursion depth (%s) exceeded. Input may be malformed or malicious.", DEPTH_MAX));
         }
-        if (null == typeSerializer) {
-            LOG.warn("method : buildJsonInfoBy -> info is null.");
-            return null;
-        }
-        if (null == serializerType) {
-            LOG.warn("method : buildJsonInfoBy -> serializerType is null.");
+        if (null == typeSerializer || null == serializerType) {
             return null;
         }
         OmniSerializerJsonInfo jsonInfo = new OmniSerializerJsonInfo();
@@ -232,69 +198,23 @@ public abstract class OmniParseFactory {
         return null;
     }
 
-    /**
-     * check
-     *
-     * @param stateTableName state table tame
-     * @param info           omniNativeSerializerJsonInfo
-     * @return boolean
-     */
     protected boolean check(String stateTableName, OmniNativeSerializerJsonInfo info) {
-        if (StringUtils.isEmpty(stateTableName)) {
-            LOG.warn("method : check -> stateTableName is null or empty.");
-            return false;
-        }
-        if (null == info) {
-            LOG.warn("method : check -> info is null.");
-            return false;
-        }
-
-        return true;
+        return StringUtils.isNotEmpty(stateTableName) && null != info;
     }
 
-    /**
-     * check
-     *
-     * @param typeSerializer type serializer
-     * @param serializerType serializer type
-     * @return boolean
-     */
     protected boolean check(TypeSerializer<?> typeSerializer, OmniSerializerType serializerType) {
-        if (null == typeSerializer) {
-            LOG.warn("method : check -> typeSerializer is null.");
-            return false;
-        }
-        if (null == serializerType) {
-            LOG.warn("method : check -> serializerType is null.");
-            return false;
-        }
-
-        return true;
+        return null != typeSerializer && null != serializerType;
     }
 
-    /**
-     * build descriptor by
-     *
-     * @param stateTableName state table name
-     * @param info           omniNativeSerializerJsonInfo
-     * @return StateDescriptor
-     */
+
     public abstract StateDescriptor<?, ?> buildDescriptorBy(String stateTableName, OmniNativeSerializerJsonInfo info);
 
-    /**
-     * build serializer json by
-     *
-     * @param typeSerializer type serializer
-     * @param serializerType serializer type
-     * @return OmniSerializerJsonInfo
-     */
     public OmniSerializerJsonInfo buildSerializerJsonBy(TypeSerializer<?> typeSerializer, OmniSerializerType serializerType) {
         if (!check(typeSerializer, serializerType)) {
             return null;
         }
         OmniSerializerJsonInfo jsonInfo = buildJsonInfoBy(typeSerializer, serializerType, DEPTH_START);
         if (null == jsonInfo) {
-            LOG.warn("method : buildSerializerJsonBy -> serializer type : {}, jsonInfo is null.", serializerType);
             return null;
         }
         return jsonInfo;

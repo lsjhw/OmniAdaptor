@@ -5,7 +5,6 @@ import org.apache.flink.runtime.state.metainfo.StateMetaInfoSnapshot;
 /**
  * OmniSerializerJson
  *
- * @description omni serializer key
  */
 
 public enum OmniSerializerKey {
@@ -48,12 +47,6 @@ public enum OmniSerializerKey {
         return this.getMetaKeyStr().equalsIgnoreCase(metaKey);
     }
 
-    /**
-     * get
-     *
-     * @param key str
-     * @return OmniSerializerType
-     */
     public static OmniSerializerKey get(String key) {
         if (null == key) {
             return null;
@@ -68,12 +61,6 @@ public enum OmniSerializerKey {
         return null;
     }
 
-    /**
-     * get
-     *
-     * @param metaKey meta key str
-     * @return OmniSerializerType
-     */
     public static OmniSerializerKey getBy(String metaKey) {
         if (null == metaKey) {
             return null;

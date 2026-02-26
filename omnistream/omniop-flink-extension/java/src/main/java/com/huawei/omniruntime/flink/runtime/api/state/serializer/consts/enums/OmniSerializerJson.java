@@ -3,7 +3,6 @@ package com.huawei.omniruntime.flink.runtime.api.state.serializer.consts.enums;
 /**
  * OmniSerializerJson
  *
- * @description omni serializer json
  */
 
 public enum OmniSerializerJson {
@@ -29,12 +28,6 @@ public enum OmniSerializerJson {
         return this.key.equalsIgnoreCase(key);
     }
 
-    /**
-     * get
-     *
-     * @param key str
-     * @return OmniSerializerType
-     */
     public static OmniSerializerJson get(String key) {
         if (null == key) {
             return null;

@@ -5,7 +5,6 @@ import org.apache.flink.api.common.state.StateDescriptor;
 /**
  * OmniSerializerKeyedStateType
  *
- * @description omni serializer keyed state type
  */
 
 public enum OmniSerializerKeyedStateType {
@@ -38,12 +37,6 @@ public enum OmniSerializerKeyedStateType {
         return this.code.equalsIgnoreCase(code);
     }
 
-    /**
-     * get by code
-     *
-     * @param code int
-     * @return OmniSerializerType
-     */
     public static OmniSerializerKeyedStateType get(String code) {
         for (OmniSerializerKeyedStateType item : OmniSerializerKeyedStateType.values()) {
             if (item.equals(code)) {

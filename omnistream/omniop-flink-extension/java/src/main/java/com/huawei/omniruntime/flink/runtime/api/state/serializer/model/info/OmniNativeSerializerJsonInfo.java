@@ -11,7 +11,6 @@ import java.util.List;
 /**
  * OmniNativeSerializerJsonInfo
  *
- * @description omni native serializer json info
  */
 @JsonInclude(JsonInclude.Include.NON_NULL)
 public class OmniNativeSerializerJsonInfo implements Serializable {

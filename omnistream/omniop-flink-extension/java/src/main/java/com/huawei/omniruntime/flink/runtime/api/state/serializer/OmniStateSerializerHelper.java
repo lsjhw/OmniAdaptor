@@ -32,7 +32,6 @@ import java.util.Map;
 /**
  * OmniStateSerializerFactory
  *
- * @description omni state serializer factory
  */
 
 public class OmniStateSerializerHelper {
@@ -53,16 +52,6 @@ public class OmniStateSerializerHelper {
     private OmniStateSerializerHelper() {
     }
 
-    /**
-     * build serializer info
-     *
-     * @param taskKey             task key
-     * @param stateTableName      state table name
-     * @param typeCode            type code
-     * @param serializerMap       serializer map
-     * @param executionConfig     execution config
-     * @param userCodeClassLoader userCodeClassLoader
-     */
     public static OmniStateMetaSerializerInfo.Builder buildSerializerInfo(String taskKey,
                                                                           String stateTableName,
                                                                           int typeCode,
@@ -71,27 +60,16 @@ public class OmniStateSerializerHelper {
                                                                           ClassLoader userCodeClassLoader) {
         try {
             StateMetaInfoSnapshot.BackendStateType backendStateType = StateMetaInfoSnapshot.BackendStateType.byCode(typeCode);
-            if (null == backendStateType) {
-                LOG.warn("method : buildSerializerInfo -> taskKey : {}, stateTableName : {}, typeCode : {} undefined.", taskKey, stateTableName, typeCode);
-                return null;
-            }
-            if (null == serializerMap || serializerMap.isEmpty()) {
-                LOG.warn("method : buildSerializerInfo -> taskKey : {}, stateTableName : {}, serializer is null or empty.", taskKey, stateTableName);
-                return null;
-            }
-            if (null == executionConfig) {
-                LOG.warn("method : buildSerializerInfo -> taskKey : {}, stateTableName : {}, executionConfig is null.", taskKey, stateTableName);
-                return null;
-            }
-            if (null == userCodeClassLoader) {
-                LOG.warn("method : buildSerializerInfo -> taskKey : {}, stateTableName : {}, userCodeClassLoader is null.", taskKey, stateTableName);
+            if (null == backendStateType
+                    || (null == serializerMap || serializerMap.isEmpty())
+                    || null == executionConfig
+                    || null == userCodeClassLoader) {
                 return null;
             }
             OmniStateMetaSerializerInfo.Builder builder = OmniStateMetaSerializerInfo.builder();
             builder.backendStateType(backendStateType);
             for (Map.Entry<String, String> item : serializerMap.entrySet()) {
                 if (null == item) {
-                    LOG.warn("method : buildSerializerInfo -> taskKey : {}, stateTableName : {}, item is null.", taskKey, stateTableName);
                     continue;
                 }
                 OmniSerializerKey serializerKey = OmniSerializerKey.get(item.getKey());
@@ -104,11 +82,6 @@ public class OmniStateSerializerHelper {
                     if (StateMetaInfoSnapshot.BackendStateType.KEY_VALUE.equals(backendStateType)
                             && OmniSerializerKey.NAMESPACE_SERIALIZER.equals(serializerKey)) {
                         builder.serializerGroup(OmniSerializerKey.NAMESPACE_SERIALIZER.getMetaKeyStr(), VoidNamespaceSerializer.INSTANCE);
-                        LOG.warn("method : buildSerializerInfo -> taskKey : {}, stateTableName : {}, key : {}, item value is empty, default VoidNamespaceSerializer.",
-                                taskKey, stateTableName, item.getKey());
-                    } else {
-                        LOG.warn("method : buildSerializerInfo -> taskKey : {}, stateTableName : {}, key : {}, item value is empty.",
-                                taskKey, stateTableName, item.getKey());
                     }
                     continue;
                 }
@@ -129,17 +102,6 @@ public class OmniStateSerializerHelper {
         }
     }
 
-    /**
-     * build state descriptor
-     *
-     * @param taskKey             task key
-     * @param stateTableName      state table name
-     * @param key                 key
-     * @param jsonStr             json str
-     * @param executionConfig     execution config
-     * @param userCodeClassLoader userCodeClassLoader
-     * @return StateDescriptor<?, ?>
-     */
     public static StateDescriptor<?, ?> buildStateDescriptor(String taskKey,
                                                              String stateTableName,
                                                              String key,
@@ -147,31 +109,21 @@ public class OmniStateSerializerHelper {
                                                              ExecutionConfig executionConfig,
                                                              ClassLoader userCodeClassLoader) {
         try {
-            if (StringUtils.isEmpty(jsonStr)) {
-                return null;
-            }
-            if (null == userCodeClassLoader) {
-                return null;
-            }
-            if (null == executionConfig) {
+            if (StringUtils.isEmpty(jsonStr)
+                    || null == userCodeClassLoader
+                    || null == executionConfig) {
                 return null;
             }
             OmniNativeSerializerJsonInfo info = convert(jsonStr, userCodeClassLoader, DEPTH_START);
             if (null == info) {
-                LOG.warn("method : buildStateDescriptor -> taskKey : {}, stateTableName : {}, key : {} convert fail.",
-                        taskKey, stateTableName, key);
                 return null;
             }
             OmniParseFactory factory = OmniParseFactory.build(info.getSerializerType());
             if (null == factory) {
-                LOG.warn("method : buildStateDescriptor -> taskKey : {}, stateTableName : {}, key : {}, type : {} can't build factory.",
-                        taskKey, stateTableName, key, info.getSerializerType());
                 return null;
             }
             StateDescriptor<?, ?> stateDescriptor = factory.buildDescriptorBy(stateTableName, info);
             if (null == stateDescriptor) {
-                LOG.warn("method : buildStateDescriptor -> taskKey : {}, stateTableName : {}, key : {}, type : {} stateDescriptor is null.",
-                        taskKey, stateTableName, key, info.getSerializerType());
                 return null;
             }
             stateDescriptor.initializeSerializerUnlessSet(executionConfig);
@@ -184,13 +136,6 @@ public class OmniStateSerializerHelper {
         }
     }
 
-    /**
-     * convert
-     *
-     * @param jsonStr             json str
-     * @param userCodeClassLoader userCodeClassLoader
-     * @param depth               depth
-     */
     private static OmniNativeSerializerJsonInfo convert(String jsonStr,
                                                         ClassLoader userCodeClassLoader,
                                                         int depth) {
@@ -252,29 +197,20 @@ public class OmniStateSerializerHelper {
         return info;
     }
 
-    /**
-     * build serializer json info
-     *
-     * @param metaInfo meta info
-     * @return Map<String, Object>
-     */
     public static Map<String, Object> buildSerializerJsonInfo(StateMetaInfoSnapshot metaInfo) {
         Map<String, Object> metaInfoGroup = new HashMap<>();
         try {
             if (null == metaInfo) {
-                LOG.warn("method : buildSerializerJsonInfo -> metaInfo is null.");
                 return metaInfoGroup;
             }
             metaInfoGroup = JsonHelper.fromJson(JsonHelper.toJson(metaInfo), new TypeReference<Map<String, Object>>() {
             });
             if (null == metaInfoGroup) {
-                LOG.warn("method : buildSerializerJsonInfo -> metaInfo convert fail.");
                 return new HashMap<>();
             }
             Map<String, OmniSerializerJsonInfo> serializerGroup = new HashMap<>();
             for (Map.Entry<String, TypeSerializerSnapshot<?>> item : metaInfo.getSerializerSnapshotsImmutable().entrySet()) {// check
                 if (null == item) {
-                    LOG.warn("method : buildSerializerJsonInfo -> item is null.");
                     continue;
                 }
                 OmniSerializerKey serializerKey = OmniSerializerKey.getBy(item.getKey());
@@ -287,9 +223,6 @@ public class OmniStateSerializerHelper {
                     if (StateMetaInfoSnapshot.BackendStateType.KEY_VALUE.equals(metaInfo.getBackendStateType())
                             && OmniSerializerKey.NAMESPACE_SERIALIZER.equals(serializerKey)) {
                         serializerGroup.put(OmniSerializerKey.NAMESPACE_SERIALIZER.getKey(), buildJsonInfo(VoidNamespaceSerializer.INSTANCE));
-                        LOG.warn("method : buildSerializerJsonInfo -> key : {}, item value is empty, item value is empty, default VoidNamespaceSerializer.", item.getKey());
-                    } else {
-                        LOG.warn("method : buildSerializerJsonInfo -> key : {}, item value is empty.", item.getKey());
                     }
                     continue;
                 }
@@ -312,26 +245,17 @@ public class OmniStateSerializerHelper {
         }
     }
 
-    /**
-     * build json info
-     *
-     * @param typeSerializer type serializer
-     * @return OmniSerializerJsonInfo
-     */
     public static OmniSerializerJsonInfo buildJsonInfo(TypeSerializer<?> typeSerializer) {
         try {
             if (typeSerializer == null) {
-                LOG.warn("method : buildJsonInfo -> typeSerializer is null.");
                 return null;
             }
             OmniSerializerType serializerType = OmniSerializerType.get(typeSerializer.getClass());
             if (null == serializerType) {
-                LOG.warn("method : buildJsonInfo -> serializerClazz : {} undefined.", typeSerializer.getClass());
                 return null;
             }
             OmniParseFactory factory = OmniParseFactory.build(serializerType);
             if (null == factory) {
-                LOG.warn("method : buildJsonInfo -> type : {} can't build factory.", serializerType);
                 return null;
             }
             return factory.buildSerializerJsonBy(typeSerializer, serializerType);
@@ -341,34 +265,19 @@ public class OmniStateSerializerHelper {
         }
     }
 
-    /**
-     * get state backend key serializer
-     *
-     * @param headOperator head operator
-     * @return TypeSerializer<?>
-     */
     private static TypeSerializer<?> getStateBackendKeySerializer(StreamOperator<?> headOperator) {
         if (null == headOperator) {
-            LOG.warn("method : getStateBackendKeySerializer -> headOperator is null.");
             return null;
         }
         KeyedStateBackend<?> keyedBackend = ((AbstractStreamOperator<?>) headOperator).getKeyedStateBackend();
         if (null == keyedBackend) {
-            LOG.warn("method : getStateBackendKeySerializer -> keyedBackend is null.");
             return null;
         }
         return keyedBackend.getKeySerializer();
     }
 
-    /**
-     * get state backend key serializer
-     *
-     * @param streamTask stream task
-     * @return TypeSerializer<?>
-     */
     public static TypeSerializer<?> getStateBackendKeySerializer(StreamTask<?, ?> streamTask) {
         if (null == streamTask) {
-            LOG.warn("method : getStateBackendKeySerializer -> streamTask is null.");
             return null;
         }
         StreamOperator<?> headOperator = ReflectionUtils.retrievePrivateField(streamTask, STREAM_TASK_PRIVATE_KEY_MAIN_OPERATOR);
@@ -376,14 +285,6 @@ public class OmniStateSerializerHelper {
         return getStateBackendKeySerializer(headOperator);
     }
 
-    /**
-     * get state backend key serializer
-     *
-     * @param taskKey             task key
-     * @param executionConfig     execution config
-     * @param userCodeClassLoader userCodeClassLoader
-     * @return TypeSerializer<?>
-     */
     public static TypeSerializer<?> getStateBackendKeySerializer(String taskKey,
                                                                  Map<String, Object> metaInfo,
                                                                  ExecutionConfig executionConfig,

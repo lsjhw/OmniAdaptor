@@ -136,12 +136,7 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Future;
@@ -967,14 +962,31 @@ public class OmniTask extends Task {
         triggerCheckpointCpp(nativeTaskRef,checkpointID,checkpointTimestamp,checkpointOptionsString);
     }
 
+    /**
+     * get checkpointing env
+     * @return runtimeEnvironment
+     */
+    public RuntimeEnvironment getCheckpointingEnv() {
+        return this.checkpointingEnv;
+    }
+
+    /**
+     * get execution config
+     * @return executionConfig
+     */
+    public ExecutionConfig getExecutionConfig() {
+        StreamTask<?, ?> streamTask = (StreamTask<?, ?>) this.invokable;
+        return Objects.requireNonNull(streamTask).getExecutionConfig();
+    }
+
     public SnapshotResult<StreamStateHandle> materializeMetaData(
             final long checkpointId,
             final List<StateMetaInfoSnapshot> stateMetaInfoSnapshots,
             final LocalRecoveryConfig localRecoveryConfig,
-            final CheckpointOptions checkpointOptions
-    )
-            throws Exception {
+            final CheckpointOptions checkpointOptions,
+            TypeSerializer<?> keySerializer) throws Exception {
         this.checkpointOptions = checkpointOptions;
+
         final CloseableRegistry snapshotCloseableRegistry = new CloseableRegistry();
         final CloseableRegistry tmpResourcesRegistry = new CloseableRegistry();
 
@@ -995,8 +1007,13 @@ public class OmniTask extends Task {
         snapshotCloseableRegistry.registerCloseable(streamWithResultProvider);
 
         try {
-            final TypeSerializer<?> keySerializer =
-                    BasicTypeInfo.LONG_TYPE_INFO.createSerializer(((StreamTask<?, ?>) this.invokable).getExecutionConfig());
+//            final TypeSerializer<?> keySerializer =
+//                    BasicTypeInfo.STRING_TYPE_INFO.createSerializer(((StreamTask<?, ?>) this.invokable).getExecutionConfig());
+
+            LOG.info("method : materializeMetaData -> keySerializer : {}", keySerializer);
+            keySerializer = (null != keySerializer)
+                    ? keySerializer
+                    : BasicTypeInfo.STRING_TYPE_INFO.createSerializer(((StreamTask<?, ?>) this.invokable).getExecutionConfig());
             
             KeyedBackendSerializationProxy<?> serializationProxy =
                     new KeyedBackendSerializationProxy<>(keySerializer, stateMetaInfoSnapshots, false);
@@ -1241,10 +1258,16 @@ public class OmniTask extends Task {
 
     public void writeSavepointMetadata(
             CheckpointStreamWithResultProvider provider,
-            final List<StateMetaInfoSnapshot> stateMetaInfoSnapshots)
+            final List<StateMetaInfoSnapshot> stateMetaInfoSnapshots,
+            TypeSerializer<?> keySerializer)
             throws Exception {
-        final TypeSerializer<?> keySerializer =
-            BasicTypeInfo.LONG_TYPE_INFO.createSerializer(((StreamTask<?, ?>) this.invokable).getExecutionConfig());
+//        final TypeSerializer<?> keySerializer =
+//            BasicTypeInfo.STRING_TYPE_INFO.createSerializer(((StreamTask<?, ?>) this.invokable).getExecutionConfig());
+
+        LOG.info("method : writeSavepointMetadata -> keySerializer : {}", keySerializer);
+        keySerializer = (null != keySerializer)
+                ? keySerializer
+                : BasicTypeInfo.STRING_TYPE_INFO.createSerializer(((StreamTask<?, ?>) this.invokable).getExecutionConfig());
         
         KeyedBackendSerializationProxy<?> serializationProxy =
                 new KeyedBackendSerializationProxy<>(keySerializer, stateMetaInfoSnapshots, false);

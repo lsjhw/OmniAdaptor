@@ -253,7 +253,7 @@ public class OmniTaskWrapper {
                             metaInfo,
                             executionConfig,
                             userCodeClassLoader);
-                    LOG.info("method : materializeMetaData -> keySerializer : {}", keySerializer);
+                    LOG.debug("method : materializeMetaData -> keySerializer : {}", keySerializer);
                 }
 
                 Map<String, String> serializer = JsonHelper.fromJson(metaInfo.get("serializer").toString(), HashMap.class);
@@ -271,7 +271,7 @@ public class OmniTaskWrapper {
                     builder.options(options);
                     serializerInfo = builder.build();
                 }
-                LOG.info("method : materializeMetaData -> serializerInfo : {}", serializerInfo);
+                LOG.debug("method : materializeMetaData -> serializerInfo : {}", serializerInfo);
 
                 stateMetaInfoSnapshots.add(new StateMetaInfoSnapshot(
                         name,
@@ -280,7 +280,7 @@ public class OmniTaskWrapper {
                         null == serializerInfo ? Collections.emptyMap() : serializerInfo.getSerializerSnapshotGroup(),
                         null == serializerInfo ? Collections.emptyMap() : serializerInfo.getSerializerGroup()));
             }
-            LOG.info("method : materializeMetaData -> taskKey : {}, stateMetaInfoSnapshots : {}", taskKey, stateMetaInfoSnapshots);
+            LOG.debug("method : materializeMetaData -> taskKey : {}, stateMetaInfoSnapshots : {}", taskKey, stateMetaInfoSnapshots);
 
             return omniTask.materializeMetaData(checkpointId, stateMetaInfoSnapshots, recoveryConfig, parseCheckpointOptions(checkpointOptionStr), keySerializer);
         } catch (Exception e) {
@@ -336,7 +336,7 @@ public class OmniTaskWrapper {
                             metaInfo,
                             executionConfig,
                             userCodeClassLoader);
-                    LOG.info("method : writeSavepointMetadata -> keySerializer : {}", keySerializer);
+                    LOG.debug("method : writeSavepointMetadata -> keySerializer : {}", keySerializer);
                 }
 
                 Map<String, String> serializer = JsonHelper.fromJson(metaInfo.get("serializer").toString(), HashMap.class);
@@ -355,7 +355,7 @@ public class OmniTaskWrapper {
                     builder.options(options);
                     serializerInfo = builder.build();
                 }
-                LOG.info("method : writeSavepointMetadata -> serializerInfo : {}", serializerInfo);
+                LOG.debug("method : writeSavepointMetadata -> serializerInfo : {}", serializerInfo);
 
                 stateMetaInfoSnapshots.add(new StateMetaInfoSnapshot(
                         name,
@@ -364,7 +364,7 @@ public class OmniTaskWrapper {
                         null == serializerInfo ? Collections.emptyMap() : serializerInfo.getSerializerSnapshotGroup(),
                         null == serializerInfo ? Collections.emptyMap() : serializerInfo.getSerializerGroup()));
             }
-            LOG.info("method : writeSavepointMetadata -> taskKey : {}, stateMetaInfoSnapshots : {}", taskKey, stateMetaInfoSnapshots);
+            LOG.debug("method : writeSavepointMetadata -> taskKey : {}, stateMetaInfoSnapshots : {}", taskKey, stateMetaInfoSnapshots);
 
             omniTask.writeSavepointMetadata(provider, stateMetaInfoSnapshots, keySerializer);
         } catch (Exception e) {
@@ -549,7 +549,7 @@ public class OmniTaskWrapper {
                 stateMetaInfoSnapshotList.add(OmniStateSerializerHelper.buildSerializerJsonInfo(metaInfo));
             }
 
-            LOG.info("method : readMetaData -> stateMetaInfoSnapshotList : {}", JsonHelper.toJson(stateMetaInfoSnapshotList));
+            LOG.debug("method : readMetaData -> stateMetaInfoSnapshotList : {}", JsonHelper.toJson(stateMetaInfoSnapshotList));
 
             // Convert to a string and return to C++
             return JsonHelper.toJson(stateMetaInfoSnapshotList);

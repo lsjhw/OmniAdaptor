@@ -87,8 +87,6 @@ public class OmniStateSerializerHelper {
                 }
                 StateDescriptor<?, ?> stateDescriptor = buildStateDescriptor(taskKey, stateTableName, item.getKey(), item.getValue(), executionConfig, userCodeClassLoader);
                 if (null == stateDescriptor) {
-                    LOG.warn("method : buildStateDescriptor -> taskKey : {}, stateTableName : {}, key : {} stateDescriptor is null.",
-                            taskKey, stateTableName, item.getKey());
                     continue;
                 }
                 builder.serializerGroup(serializerKey.getMetaKeyStr(), stateDescriptor.getSerializer());
@@ -140,8 +138,7 @@ public class OmniStateSerializerHelper {
                                                         ClassLoader userCodeClassLoader,
                                                         int depth) {
         if (depth > DEPTH_MAX) {
-            LOG.warn("method : buildTypeInformationBy -> max recursion depth ({}) exceeded. Input may be malformed or malicious.", DEPTH_MAX);
-            return null;
+            throw new GeneralRuntimeException(String.format("max recursion depth (%s) exceeded. Input may be malformed or malicious.", DEPTH_MAX));
         }
         if (StringUtils.isEmpty(jsonStr)) {
             return null;

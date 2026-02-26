@@ -13,7 +13,6 @@ import org.slf4j.LoggerFactory;
  */
 
 public class OmniParseListFactory extends OmniParseFactory {
-    private static final Logger LOG = LoggerFactory.getLogger(OmniParseListFactory.class);
 
     @Override
     public StateDescriptor<?, ?> buildDescriptorBy(String stateTableName, OmniNativeSerializerJsonInfo info) {
@@ -22,12 +21,10 @@ public class OmniParseListFactory extends OmniParseFactory {
         }
         OmniNativeSerializerJsonInfo valueSerializerInfo = info.getValueSerializer();
         if (null == valueSerializerInfo) {
-            LOG.warn("method : buildDescriptorBy -> stateTableName : {}, valueSerializerInfo is null.", stateTableName);
             return null;
         }
         TypeInformation<?> elementTypeInfo = buildTypeInformationBy(valueSerializerInfo, DEPTH_START);
         if (null == elementTypeInfo) {
-            LOG.warn("method : buildDescriptorBy -> stateTableName : {}, elementTypeInfo is null.", stateTableName);
             return null;
         }
 

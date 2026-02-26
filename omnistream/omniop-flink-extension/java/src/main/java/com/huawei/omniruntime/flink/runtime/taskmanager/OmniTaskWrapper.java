@@ -220,8 +220,6 @@ public class OmniTaskWrapper {
                 recoveryConfig = new LocalRecoveryConfig(provider);
             }
 
-            LOG.info("method : materializeMetaData -> taskKey : {}, checkpointOptionStr : {}", taskKey, checkpointOptionStr);
-            LOG.info("method : materializeMetaData -> taskKey : {}, stateMetaInfoMaps : {}", taskKey, stateMetaInfoMaps);
             ExecutionConfig executionConfig = omniTask.getExecutionConfig();
             ClassLoader userCodeClassLoader = omniTask.getCheckpointingEnv()
                     .getUserCodeClassLoader().asClassLoader();
@@ -305,7 +303,6 @@ public class OmniTaskWrapper {
 
             // build key
             String taskKey = SC.HYPHEN;
-            LOG.info("method : writeSavepointMetadata -> taskKey : {}, stateMetaInfoMaps : {}", taskKey, stateMetaInfoMaps);
             ExecutionConfig executionConfig = omniTask.getExecutionConfig();
             ClassLoader userCodeClassLoader = omniTask.getCheckpointingEnv()
                     .getUserCodeClassLoader().asClassLoader();
@@ -540,9 +537,7 @@ public class OmniTaskWrapper {
                     new KeyedBackendSerializationProxy<>(userCodeClassLoader);
             serializationProxy.read(in);
             List<StateMetaInfoSnapshot> stateMetaInfoSnapshots = serializationProxy.getStateMetaInfoSnapshots();
-            LOG.error("method : readMetaData -> stateMetaInfoSnapshots : {}", JsonHelper.toJson(stateMetaInfoSnapshots));
 
-            // deal
             List<Map<String, Object>> stateMetaInfoSnapshotList = new ArrayList<>(stateMetaInfoSnapshots.size());
             for (StateMetaInfoSnapshot metaInfo : stateMetaInfoSnapshots) {
                 stateMetaInfoSnapshotList.add(OmniStateSerializerHelper.buildSerializerJsonInfo(metaInfo));

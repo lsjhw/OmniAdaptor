@@ -1010,7 +1010,6 @@ public class OmniTask extends Task {
 //            final TypeSerializer<?> keySerializer =
 //                    BasicTypeInfo.STRING_TYPE_INFO.createSerializer(((StreamTask<?, ?>) this.invokable).getExecutionConfig());
 
-            LOG.info("method : materializeMetaData -> keySerializer : {}", keySerializer);
             keySerializer = (null != keySerializer)
                     ? keySerializer
                     : BasicTypeInfo.STRING_TYPE_INFO.createSerializer(((StreamTask<?, ?>) this.invokable).getExecutionConfig());
@@ -1264,7 +1263,6 @@ public class OmniTask extends Task {
 //        final TypeSerializer<?> keySerializer =
 //            BasicTypeInfo.STRING_TYPE_INFO.createSerializer(((StreamTask<?, ?>) this.invokable).getExecutionConfig());
 
-        LOG.info("method : writeSavepointMetadata -> keySerializer : {}", keySerializer);
         keySerializer = (null != keySerializer)
                 ? keySerializer
                 : BasicTypeInfo.STRING_TYPE_INFO.createSerializer(((StreamTask<?, ?>) this.invokable).getExecutionConfig());

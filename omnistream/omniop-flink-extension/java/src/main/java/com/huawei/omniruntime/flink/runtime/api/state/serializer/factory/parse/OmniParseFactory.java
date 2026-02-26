@@ -55,7 +55,6 @@ public abstract class OmniParseFactory {
             LOG.warn("method : build -> serializerType is null.");
             return null;
         }
-        // default
         OmniParseFactory factory = null;
         if (serializerType.isBasic()) {
             factory = new OmniParseValueFactory();
@@ -91,7 +90,6 @@ public abstract class OmniParseFactory {
      * @return TypeInformation<?>
      */
     protected TypeInformation<?> buildTypeInformationBy(OmniNativeSerializerJsonInfo info, int depth) {
-        // check
         if (depth > DEPTH_MAX) {
             LOG.warn("method : buildTypeInformationBy -> max recursion depth ({}) exceeded. Input may be malformed or malicious.", DEPTH_MAX);
             return null;
@@ -107,33 +105,24 @@ public abstract class OmniParseFactory {
         if (info.getSerializerType().isBasic()) {
             return BasicTypeInfo.getInfoFor(info.getSerializerType().getClazz());
         } else if (OmniSerializerType.LIST.equals(info.getSerializerType())) {
-            // get
             OmniNativeSerializerJsonInfo valueSerializerInfo = info.getValueSerializer();
-            // recursion
             TypeInformation<?> elementTypeInfo = (null == valueSerializerInfo)
                     ? TypeInformation.of(Object.class)
                     : buildTypeInformationBy(valueSerializerInfo, depth + DEPTH_INTERVAL);
-            // return
             return Types.LIST(elementTypeInfo);
         } else if (OmniSerializerType.MAP.equals(info.getSerializerType())) {
-            // get
             OmniNativeSerializerJsonInfo keySerializerInfo = info.getKeySerializer();
             OmniNativeSerializerJsonInfo valueSerializerInfo = info.getValueSerializer();
-            // recursion
             TypeInformation<?> keyTypeInfo = (null == keySerializerInfo)
                     ? Types.STRING : buildTypeInformationBy(keySerializerInfo, depth + DEPTH_INTERVAL);
             TypeInformation<?> valueTypeInfo = (null == valueSerializerInfo)
                     ? TypeInformation.of(Object.class) : buildTypeInformationBy(valueSerializerInfo, depth + DEPTH_INTERVAL);
-            // return
             return Types.MAP(keyTypeInfo, valueTypeInfo);
         } else if (OmniSerializerType.POJO.equals(info.getSerializerType())) {
-            // return
             return Types.POJO(info.getElementTypeClazz());
         } else if (OmniSerializerType.TUPLE.equals(info.getSerializerType())) {
-            // return
             return TypeExtractor.createTypeInfo(info.getElementTypeClazz());
         } else if (OmniSerializerType.VOID_NAMESPACE.equals(info.getSerializerType())) {
-            // return
             return new VoidNamespaceTypeInfo();
         }
 
@@ -149,7 +138,6 @@ public abstract class OmniParseFactory {
      * @return OmniSerializerJsonInfo
      */
     protected OmniSerializerJsonInfo buildJsonInfoBy(TypeSerializer<?> typeSerializer, OmniSerializerType serializerType, int depth) {
-        // check
         if (depth > DEPTH_MAX) {
             LOG.warn("method : buildJsonInfoBy -> max recursion depth ({}) exceeded. Input may be malformed or malicious.", DEPTH_MAX);
             return null;
@@ -162,29 +150,22 @@ public abstract class OmniParseFactory {
             LOG.warn("method : buildJsonInfoBy -> serializerType is null.");
             return null;
         }
-        // build
         OmniSerializerJsonInfo jsonInfo = new OmniSerializerJsonInfo();
         jsonInfo.setSerializerName(typeSerializer.getClass().getName());
         if (serializerType.isBasic()) {
             return jsonInfo;
         } else if (OmniSerializerType.LIST.equals(serializerType)) {
-            // convert
             ListSerializer<?> listSerializer = (ListSerializer<?>) typeSerializer;
-            // recursion
             OmniSerializerJsonInfo elementSerializerJsonInfo = (null == listSerializer.getElementSerializer())
                     ? null
                     : buildJsonInfoBy(
                     listSerializer.getElementSerializer(),
                     OmniSerializerType.get(listSerializer.getElementSerializer().getClass()),
                     depth + DEPTH_INTERVAL);
-            // set
             jsonInfo.setElementSerializer(elementSerializerJsonInfo);
-            // return
             return jsonInfo;
         } else if (OmniSerializerType.MAP.equals(serializerType)) {
-            // convert
             MapSerializer<?, ?> mapSerializer = (MapSerializer<?, ?>) typeSerializer;
-            // recursion
             OmniSerializerJsonInfo keySerializerJsonInfo = (null == mapSerializer.getKeySerializer())
                     ? null
                     : buildJsonInfoBy(
@@ -197,19 +178,14 @@ public abstract class OmniParseFactory {
                     mapSerializer.getValueSerializer(),
                     OmniSerializerType.get(mapSerializer.getValueSerializer().getClass()),
                     depth + DEPTH_INTERVAL);
-            // set
             jsonInfo.setKeySerializer(keySerializerJsonInfo);
             jsonInfo.setValueSerializer(valueSerializerJsonInfo);
-            // return
             return jsonInfo;
         } else if (OmniSerializerType.POJO.equals(serializerType)) {
-            // convert
             PojoSerializer<?> pojoSerializer = (PojoSerializer<?>) typeSerializer;
-            // reflect get
             Class<?> clazz = ReflectionUtils.retrievePrivateField(pojoSerializer, TYPE_SERIALIZER_PRIVATE_KEY_CLAZZ);
             Field[] fields = ReflectionUtils.retrievePrivateField(pojoSerializer, TYPE_SERIALIZER_PRIVATE_KEY_FIELDS);
             TypeSerializer<?>[] fieldSerializers = ReflectionUtils.retrievePrivateField(pojoSerializer, TYPE_SERIALIZER_PRIVATE_KEY_FIELD_SERIALIZERS);
-            // recursion
             List<String> fieldInfoList = new ArrayList<>();
             if (null != fields) {
                 for (Field field : fields) {
@@ -228,18 +204,13 @@ public abstract class OmniParseFactory {
                     fieldSerializerInfoList.add(fieldSerializerJsonInfo);
                 }
             }
-            // set
             jsonInfo.setClazz(null == clazz ? SC.EMPTY : clazz.getName());
             jsonInfo.setFields(fieldInfoList);
             jsonInfo.setFieldSerializers(fieldSerializerInfoList);
-            // return
             return jsonInfo;
         } else if (OmniSerializerType.TUPLE.equals(serializerType)) {
-            // convert
             TupleSerializer<?> tupleSerializer = (TupleSerializer<?>) typeSerializer;
-            // reflect get
             TypeSerializer<?>[] fieldSerializers = ReflectionUtils.retrievePrivateField(tupleSerializer, TYPE_SERIALIZER_PRIVATE_KEY_FIELD_SERIALIZERS);
-            // recursion
             List<OmniSerializerJsonInfo> fieldSerializerInfoList = new ArrayList<>();
             if (null != fieldSerializerInfoList) {
                 for (TypeSerializer<?> fieldSerializer : fieldSerializers) {
@@ -252,12 +223,9 @@ public abstract class OmniParseFactory {
                     fieldSerializerInfoList.add(fieldSerializerJsonInfo);
                 }
             }
-            // set
             jsonInfo.setFieldSerializers(fieldSerializerInfoList);
-            // return
             return jsonInfo;
         } else if (OmniSerializerType.VOID_NAMESPACE.equals(serializerType)) {
-            // return
             return jsonInfo;
         }
 
@@ -321,11 +289,9 @@ public abstract class OmniParseFactory {
      * @return OmniSerializerJsonInfo
      */
     public OmniSerializerJsonInfo buildSerializerJsonBy(TypeSerializer<?> typeSerializer, OmniSerializerType serializerType) {
-        // check
         if (!check(typeSerializer, serializerType)) {
             return null;
         }
-        // build
         OmniSerializerJsonInfo jsonInfo = buildJsonInfoBy(typeSerializer, serializerType, DEPTH_START);
         if (null == jsonInfo) {
             LOG.warn("method : buildSerializerJsonBy -> serializer type : {}, jsonInfo is null.", serializerType);

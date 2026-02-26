@@ -18,17 +18,14 @@ public class OmniParseListFactory extends OmniParseFactory {
 
     @Override
     public StateDescriptor<?, ?> buildDescriptorBy(String stateTableName, OmniNativeSerializerJsonInfo info) {
-        // check
         if (!super.check(stateTableName, info)) {
             return null;
         }
-        // get
         OmniNativeSerializerJsonInfo valueSerializerInfo = info.getValueSerializer();
         if (null == valueSerializerInfo) {
             LOG.warn("method : buildDescriptorBy -> stateTableName : {}, valueSerializerInfo is null.", stateTableName);
             return null;
         }
-        // build
         TypeInformation<?> elementTypeInfo = buildTypeInformationBy(valueSerializerInfo, DEPTH_START);
         if (null == elementTypeInfo) {
             LOG.warn("method : buildDescriptorBy -> stateTableName : {}, elementTypeInfo is null.", stateTableName);

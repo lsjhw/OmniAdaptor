@@ -105,7 +105,6 @@ public class OmniStateMetaSerializerInfo implements Serializable {
 
     @Override
     public String toString() {
-        // map deal
         List<String> serializerList = new ArrayList<>();
         for (Map.Entry<String, TypeSerializer<?>> serializer : this.serializerGroup.entrySet()) {
             if (null == serializer) {

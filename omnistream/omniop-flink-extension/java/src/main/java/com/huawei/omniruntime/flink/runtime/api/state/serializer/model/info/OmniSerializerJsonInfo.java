@@ -82,7 +82,6 @@ public class OmniSerializerJsonInfo implements Serializable {
 
     @Override
     public String toString() {
-        // deal
         List<String> fieldInfoList = new ArrayList<>();
         if (null != this.fields) {
             fieldInfoList.addAll(this.fields);

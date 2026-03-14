@@ -13,12 +13,17 @@ package com.huawei.omniruntime.flink.runtime.api.graph.json;
 
 import com.huawei.omniruntime.flink.runtime.metrics.exception.GeneralRuntimeException;
 
+import com.huawei.omniruntime.flink.runtime.taskmanager.OmniTask;
+import org.apache.flink.core.fs.CloseableRegistry;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.runtime.checkpoint.InflightDataRescalingDescriptor;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.checkpoint.StateObjectCollection;
 import org.apache.flink.runtime.checkpoint.TaskStateSnapshot;
+import org.apache.flink.runtime.checkpoint.channel.InputChannelInfo;
+import org.apache.flink.runtime.checkpoint.channel.ResultSubpartitionInfo;
 import org.apache.flink.runtime.jobgraph.OperatorID;
+import org.apache.flink.runtime.state.*;
 import org.apache.flink.runtime.state.DirectoryStateHandle;
 import org.apache.flink.runtime.state.KeyGroupRangeOffsets;
 import org.apache.flink.runtime.state.KeyGroupsSavepointStateHandle;
@@ -34,7 +39,6 @@ import org.apache.flink.runtime.state.StreamStateHandle;
 import org.apache.flink.runtime.state.filesystem.FileStateHandle;
 import org.apache.flink.runtime.state.filesystem.RelativeFileStateHandle;
 import org.apache.flink.runtime.state.memory.ByteStreamStateHandle;
-import org.apache.flink.runtime.state.DirectoryKeyedStateHandle;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
@@ -43,23 +47,17 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.Arra
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.JsonNodeFactory;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.flink.util.FlinkRuntimeException;
+import org.apache.flink.util.IOUtils;
 import org.apache.flink.util.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-
+import java.io.InputStream;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.InvocationTargetException;
+import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.util.ArrayList;
-import java.util.Base64;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.Objects;
-import java.util.Set;
+import java.util.*;
 import java.io.IOException;
 
 /**
@@ -177,8 +175,8 @@ public class TaskStateSnapshotDeser {
      * @throws FlinkRuntimeException FlinkRuntimeException
      * @throws JsonProcessingException JsonProcessingException
      */
-    public static TaskStateSnapshot deserializeTaskStateSnapshot(String jsonString) throws FlinkRuntimeException,
-            JsonProcessingException {
+    public static TaskStateSnapshot deserializeTaskStateSnapshot(String jsonString, OmniTask omniTask)
+        throws FlinkRuntimeException, JsonProcessingException {
         if (Objects.equals(jsonString, "")) {
             return null;
         }
@@ -210,16 +208,28 @@ public class TaskStateSnapshotDeser {
             if (managedKeyedStateArray.isArray()) {
                 parseManagedKeyedStateArray(managedKeyedStateArray, managedKeyedState);
             }
+            StateObjectCollection<InputChannelStateHandle> inputChannelState = new StateObjectCollection<>();
+            JsonNode inputChannelStateArray = operatorStateNode.get("inputChannelState").get("stateObjects");
+
+            if (inputChannelStateArray.isArray()) {
+                parseInputChannelStateArray(inputChannelStateArray, inputChannelState, omniTask);
+            }
+
+            StateObjectCollection<ResultSubpartitionStateHandle> resultSubpartitionState = new StateObjectCollection<>();
+            JsonNode resultSubpartitionStateArray = operatorStateNode.get("resultSubpartitionState").get("stateObjects");
+
+            if (resultSubpartitionStateArray.isArray()) {
+                parseResultSubpartitionStateArray(resultSubpartitionStateArray, resultSubpartitionState, omniTask);
+            }
             OperatorSubtaskState.Builder builder = OperatorSubtaskState.builder();
 
             builder.setManagedKeyedState(managedKeyedState);
-
+            builder.setInputChannelState(inputChannelState);
+            builder.setResultSubpartitionState(resultSubpartitionState);
             // Empty collections for all other states
             builder.setRawKeyedState(StateObjectCollection.empty());
             builder.setManagedOperatorState(StateObjectCollection.empty());
             builder.setRawOperatorState(StateObjectCollection.empty());
-            builder.setInputChannelState(StateObjectCollection.empty());
-            builder.setResultSubpartitionState(StateObjectCollection.empty());
             builder.setInputRescalingDescriptor(InflightDataRescalingDescriptor.NO_RESCALE);
             builder.setOutputRescalingDescriptor(InflightDataRescalingDescriptor.NO_RESCALE);
             OperatorSubtaskState operatorSubtaskState = builder.build();
@@ -274,6 +284,194 @@ public class TaskStateSnapshotDeser {
                 StreamStateHandle streamStateHandle = parseStreamStateHandle(handleNode.get("streamStateHandle"));
                 KeyGroupsSavepointStateHandle flinkHandle = new KeyGroupsSavepointStateHandle(keyGroupRangeOffsets, streamStateHandle);
                 managedKeyedState.add(flinkHandle);
+            }
+        }
+    }
+
+    private static void parseInputChannelStateArray(JsonNode inputChannelStateArray,
+        StateObjectCollection<InputChannelStateHandle> inputChannelState, OmniTask omniTask) {
+        if (omniTask == null) {
+            LOG.error("parseResultSubpartitionStateArray failed. omniTask is null");
+            return;
+        }
+        for (JsonNode handleNode : inputChannelStateArray) {
+            String handleType = handleNode.get("@class").asText();
+            if ("InputChannelStateHandle".contains(handleType)) {
+                int subTaskIndex = handleNode.get("subtaskIndex").asInt();
+                InputChannelInfo info = null;
+                StreamStateHandle delegate = null;
+                JsonNode delegateNode = handleNode.get("delegate");
+                String className2 = delegateNode.get("@class").asText();
+                long streamPos = 0;
+                if (className2.contains("ByteStreamStateHandle")) {
+                    String handleName = delegateNode.get("handleName").asText();
+                    String encodedData = delegateNode.get("data").asText();
+                    byte[] decodedData = Base64.getDecoder().decode(encodedData);
+                    delegate = new ByteStreamStateHandle(handleName, decodedData);
+                } else if (className2.contains("FileStateHandle")) {
+                    java.nio.file.Path filePath = Paths.get(delegateNode.get("filePath").asText());
+                    try {
+                        delegate = uploadInflightFileToCheckpointFs(filePath, omniTask.getCheckpointStreamFactory(), streamPos);
+                    } catch (Exception e) {
+                        LOG.error("uploadFilesToCheckpointFs failed. filePath: {}", filePath);
+                        throw new RuntimeException(e);
+                    }
+                } else {
+                    LOG.error("Not support for StreamStateHandle type: " + className2);
+                    throw new RuntimeException("Not support for StreamStateHandle type: " + className2);
+                }
+                JsonNode infoNode = handleNode.get("info");
+                String className3 = infoNode.get("@class").asText();
+                if (className3.contains("InputChannelInfo")) {
+                    int partitionIdx = infoNode.get("gateIdx").asInt();
+                    int inputChannelIdx = infoNode.get("inputChannelIdx").asInt();
+                    info = new InputChannelInfo(partitionIdx, inputChannelIdx);
+                }
+                JsonNode offsetsNode = handleNode.get("offsets");
+                List<Long> offsets = new ArrayList<>();
+                if (offsetsNode.isArray() && offsetsNode.size() == 2) {
+                    JsonNode listNode = offsetsNode.get(1);
+                    if (listNode.isArray()) {
+                        for (JsonNode element : listNode) {
+                            offsets.add(element.asLong() + streamPos);
+                        }
+                    }
+                }
+                int size = handleNode.get("size").asInt();
+                AbstractChannelStateHandle.StateContentMetaInfo metaInfo = new AbstractChannelStateHandle.StateContentMetaInfo(offsets, size);
+                inputChannelState.add(new InputChannelStateHandle(subTaskIndex, info, delegate, metaInfo));
+            } else {
+                LOG.error("State handle JSON is error. handleType: " + handleType);
+                throw new RuntimeException("handleType is failed. handleType: " + handleType);
+            }
+        }
+    }
+
+    private static void parseResultSubpartitionStateArray(JsonNode resultSubpartitionStateArray,
+        StateObjectCollection<ResultSubpartitionStateHandle> resultSubpartitionState, OmniTask omniTask) {
+        if (omniTask == null) {
+            LOG.error("parseResultSubpartitionStateArray failed. omniTask is null");
+            return;
+        }
+        for (JsonNode handleNode : resultSubpartitionStateArray) {
+            String handleType = handleNode.get("@class").asText();
+            if ("ResultSubpartitionStateHandle".contains(handleType)) {
+                int subTaskIndex = handleNode.get("subtaskIndex").asInt();
+                ResultSubpartitionInfo info = null;
+                StreamStateHandle delegate = null;
+                JsonNode delegateNode = handleNode.get("delegate");
+                String className2 = delegateNode.get("@class").asText();
+                long streamPos = 0;
+                if (className2.contains("ByteStreamStateHandle")) {
+                    String handleName = delegateNode.get("handleName").asText();
+                    String encodedData = delegateNode.get("data").asText();
+                    byte[] decodedData = Base64.getDecoder().decode(encodedData);
+                    delegate = new ByteStreamStateHandle(handleName, decodedData);
+                } else if (className2.contains("FileStateHandle")) {
+                    java.nio.file.Path filePath = Paths.get(delegateNode.get("filePath").asText());
+                    try {
+                        delegate = uploadInflightFileToCheckpointFs(filePath, omniTask.getCheckpointStreamFactory(), streamPos);
+                    } catch (Exception e) {
+                        LOG.error("uploadFilesToCheckpointFs failed. filePath: {}", filePath);
+                        throw new RuntimeException(e);
+                    }
+                } else {
+                    LOG.error("Not support for StreamStateHandle type: " + className2);
+                    throw new RuntimeException("Not support for StreamStateHandle type: " + className2);
+                }
+                JsonNode infoNode = handleNode.get("info");
+                String className3 = infoNode.get("@class").asText();
+                if (className3.contains("ResultSubpartitionInfo")) {
+                    int partitionIdx = infoNode.get("partitionIdx").asInt();
+                    int subPartitionIdx = infoNode.get("subPartitionIdx").asInt();
+                    info = new ResultSubpartitionInfo(partitionIdx, subPartitionIdx);
+                }
+                JsonNode offsetsNode = handleNode.get("offsets");
+                List<Long> offsets = new ArrayList<>();
+                if (offsetsNode.isArray() && offsetsNode.size() == 2) {
+                    JsonNode listNode = offsetsNode.get(1);
+                    if (listNode.isArray()) {
+                        for (JsonNode element : listNode) {
+                            offsets.add(element.asLong() + streamPos);
+                        }
+                    }
+                }
+                int size = handleNode.get("size").asInt();
+                AbstractChannelStateHandle.StateContentMetaInfo metaInfo = new AbstractChannelStateHandle.StateContentMetaInfo(offsets, size);
+                resultSubpartitionState.add(new ResultSubpartitionStateHandle(subTaskIndex, info, delegate, metaInfo));
+            } else {
+                LOG.error("State handle JSON is error. handleType: " + handleType);
+                throw new RuntimeException("handleType is failed. handleType: " + handleType);
+            }
+        }
+    }
+
+    public static StreamStateHandle uploadInflightFileToCheckpointFs(java.nio.file.Path path,
+        CheckpointStreamFactory checkpointStreamFactory, long streamPos) throws Exception {
+        if (checkpointStreamFactory == null) {
+            throw new IllegalStateException("CheckpointStreamFactory is not initialized.");
+        }
+
+        final CloseableRegistry snapshotCloseableRegistry = new CloseableRegistry();
+        final CloseableRegistry tmpResourcesRegistry = new CloseableRegistry();
+        final CheckpointedStateScope stateScope = CheckpointedStateScope.EXCLUSIVE;
+
+        StreamStateHandle handle = null;
+        try {
+            if (path == null) {
+                return null;
+            }
+            handle = uploadLocalFileToCheckpointFs(path, checkpointStreamFactory, stateScope,
+                    snapshotCloseableRegistry, tmpResourcesRegistry, streamPos);
+            LOG.info("Checkpoint file uploaded");
+        } catch (Throwable t) {
+            tmpResourcesRegistry.close();
+            LOG.info("Error closing registry", t);
+        } finally {
+            snapshotCloseableRegistry.close();
+        }
+        return handle;
+    }
+
+    private static StreamStateHandle uploadLocalFileToCheckpointFs(java.nio.file.Path filePath,
+        CheckpointStreamFactory checkpointStreamFactory, CheckpointedStateScope stateScope,
+        CloseableRegistry closeableRegistry, CloseableRegistry tmpResourcesRegistry, long streamPos) throws IOException {
+        InputStream inputStream = null;
+        CheckpointStateOutputStream outputStream = null;
+
+        try {
+            byte[] buffer = new byte[16384];
+            inputStream = Files.newInputStream(filePath);
+            closeableRegistry.registerCloseable(inputStream);
+            outputStream = checkpointStreamFactory.createCheckpointStateOutputStream(stateScope);
+            closeableRegistry.registerCloseable(outputStream);
+            streamPos = outputStream.getPos();
+            while(true) {
+                int numBytes = inputStream.read(buffer);
+                if (numBytes == -1) {
+                    StreamStateHandle result;
+                    if (closeableRegistry.unregisterCloseable(outputStream)) {
+                        result = outputStream.closeAndGetHandle();
+                        outputStream = null;
+                    } else {
+                        result = null;
+                    }
+
+                    tmpResourcesRegistry.registerCloseable(() -> {
+                        StateUtil.discardStateObjectQuietly(result);
+                    });
+                    return result;
+                }
+
+                outputStream.write(buffer, 0, numBytes);
+            }
+        } finally {
+            if (closeableRegistry.unregisterCloseable(inputStream)) {
+                IOUtils.closeQuietly(inputStream);
+            }
+
+            if (closeableRegistry.unregisterCloseable(outputStream)) {
+                IOUtils.closeQuietly(outputStream);
             }
         }
     }

@@ -14,6 +14,7 @@ package com.huawei.omniruntime.flink.runtime.state;
 import com.huawei.omniruntime.flink.runtime.api.graph.json.TaskStateSnapshotDeser;
 import com.huawei.omniruntime.flink.runtime.metrics.exception.GeneralRuntimeException;
 
+import com.huawei.omniruntime.flink.runtime.taskmanager.OmniTask;
 import org.apache.flink.runtime.checkpoint.CheckpointMetaData;
 import org.apache.flink.runtime.checkpoint.CheckpointMetrics;
 import org.apache.flink.runtime.checkpoint.TaskStateSnapshot;
@@ -38,6 +39,8 @@ public class TaskStateManagerWrapper {
     private static final Logger LOG = LoggerFactory.getLogger(TaskStateManagerWrapper.class);
 
     private TaskStateManager taskStateManager;
+
+    private OmniTask omniTask;
 
     public TaskStateManagerWrapper(TaskStateManager taskStateManager) {
         this.taskStateManager = taskStateManager;
@@ -69,12 +72,20 @@ public class TaskStateManagerWrapper {
         TaskStateSnapshot localState;
         TaskStateSnapshot acknowledgedState;
         try {
-            acknowledgedState = TaskStateSnapshotDeser.deserializeTaskStateSnapshot(acknowledgedStateJson);
-            localState = TaskStateSnapshotDeser.deserializeTaskStateSnapshot(localStateJson);
+            acknowledgedState = TaskStateSnapshotDeser.deserializeTaskStateSnapshot(acknowledgedStateJson, getOmniTask());
+            localState = TaskStateSnapshotDeser.deserializeTaskStateSnapshot(localStateJson, getOmniTask());
         } catch (GeneralRuntimeException | JsonProcessingException e) {
             throw new FlinkRuntimeException(e);
         }
         taskStateManager.reportTaskStateSnapshots(checkpointMetaData, checkpointMetrics, acknowledgedState, localState);
+    }
+
+    public void setOmniTask(OmniTask omniTask) {
+        this.omniTask = omniTask;
+    }
+
+    public OmniTask getOmniTask() {
+        return this.omniTask;
     }
 
     private CheckpointMetrics deserializeCheckpointMetrics(String checkpointMetricsJson)

@@ -264,6 +264,9 @@ public class OmniTask extends Task {
         return taskStateManagerWrapper;
     }
 
+    public CheckpointStreamFactory getCheckpointStreamFactory() {
+        return checkpointStreamFactory;
+    }
     /**
      * The core work method that bootstraps the task and executes its code.
      */

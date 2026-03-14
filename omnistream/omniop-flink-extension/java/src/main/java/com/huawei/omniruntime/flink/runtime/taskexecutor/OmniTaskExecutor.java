@@ -449,7 +449,7 @@ public class OmniTaskExecutor extends TaskExecutor {
                         aggregateManager, classLoaderHandle, fileCache, taskManagerConfiguration, taskMetricGroup,
                         partitionStateChecker, getRpcService().getScheduledExecutor(), taskMap,
                         taskStateManagerWrapper,taskOperatorGatewayWrapper);
-
+        taskStateManagerWrapper.setOmniTask(task);
         taskMetricGroup.gauge(MetricNames.IS_BACK_PRESSURED, task::isBackPressured);
         return task;
     }

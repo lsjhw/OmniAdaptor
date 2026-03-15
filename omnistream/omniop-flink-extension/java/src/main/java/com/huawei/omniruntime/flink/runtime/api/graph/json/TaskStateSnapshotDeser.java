@@ -175,7 +175,7 @@ public class TaskStateSnapshotDeser {
      * @throws FlinkRuntimeException FlinkRuntimeException
      * @throws JsonProcessingException JsonProcessingException
      */
-    public static TaskStateSnapshot deserializeTaskStateSnapshot(String jsonString, OmniTask omniTask)
+    public static TaskStateSnapshot deserializeTaskStateSnapshot(String jsonString, OmniTask omniTask, long checkpointId)
         throws FlinkRuntimeException, JsonProcessingException {
         if (Objects.equals(jsonString, "")) {
             return null;
@@ -212,14 +212,15 @@ public class TaskStateSnapshotDeser {
             JsonNode inputChannelStateArray = operatorStateNode.get("inputChannelState").get("stateObjects");
 
             if (inputChannelStateArray.isArray()) {
-                parseInputChannelStateArray(inputChannelStateArray, inputChannelState, omniTask);
+                parseInputChannelStateArray(inputChannelStateArray, inputChannelState, omniTask, checkpointId);
             }
 
             StateObjectCollection<ResultSubpartitionStateHandle> resultSubpartitionState = new StateObjectCollection<>();
             JsonNode resultSubpartitionStateArray = operatorStateNode.get("resultSubpartitionState").get("stateObjects");
 
             if (resultSubpartitionStateArray.isArray()) {
-                parseResultSubpartitionStateArray(resultSubpartitionStateArray, resultSubpartitionState, omniTask);
+                parseResultSubpartitionStateArray(resultSubpartitionStateArray, resultSubpartitionState, omniTask,
+                    checkpointId);
             }
             OperatorSubtaskState.Builder builder = OperatorSubtaskState.builder();
 
@@ -289,7 +290,7 @@ public class TaskStateSnapshotDeser {
     }
 
     private static void parseInputChannelStateArray(JsonNode inputChannelStateArray,
-        StateObjectCollection<InputChannelStateHandle> inputChannelState, OmniTask omniTask) {
+        StateObjectCollection<InputChannelStateHandle> inputChannelState, OmniTask omniTask, long checkpointId) {
         if (omniTask == null) {
             LOG.error("parseResultSubpartitionStateArray failed. omniTask is null");
             return;
@@ -311,7 +312,8 @@ public class TaskStateSnapshotDeser {
                 } else if (className2.contains("FileStateHandle")) {
                     java.nio.file.Path filePath = Paths.get(delegateNode.get("filePath").asText());
                     try {
-                        delegate = uploadInflightFileToCheckpointFs(filePath, omniTask.getCheckpointStreamFactory(), streamPos);
+                        delegate = uploadInflightFileToCheckpointFs(filePath,
+                            omniTask.getCheckpointStreamFactory(checkpointId), streamPos);
                     } catch (Exception e) {
                         LOG.error("uploadFilesToCheckpointFs failed. filePath: {}", filePath);
                         throw new RuntimeException(e);
@@ -348,7 +350,8 @@ public class TaskStateSnapshotDeser {
     }
 
     private static void parseResultSubpartitionStateArray(JsonNode resultSubpartitionStateArray,
-        StateObjectCollection<ResultSubpartitionStateHandle> resultSubpartitionState, OmniTask omniTask) {
+        StateObjectCollection<ResultSubpartitionStateHandle> resultSubpartitionState, OmniTask omniTask,
+        long checkpointId) {
         if (omniTask == null) {
             LOG.error("parseResultSubpartitionStateArray failed. omniTask is null");
             return;
@@ -370,7 +373,8 @@ public class TaskStateSnapshotDeser {
                 } else if (className2.contains("FileStateHandle")) {
                     java.nio.file.Path filePath = Paths.get(delegateNode.get("filePath").asText());
                     try {
-                        delegate = uploadInflightFileToCheckpointFs(filePath, omniTask.getCheckpointStreamFactory(), streamPos);
+                        delegate = uploadInflightFileToCheckpointFs(filePath,
+                            omniTask.getCheckpointStreamFactory(checkpointId), streamPos);
                     } catch (Exception e) {
                         LOG.error("uploadFilesToCheckpointFs failed. filePath: {}", filePath);
                         throw new RuntimeException(e);

@@ -71,9 +71,12 @@ public class TaskStateManagerWrapper {
         // temp mock impl
         TaskStateSnapshot localState;
         TaskStateSnapshot acknowledgedState;
+        long checkpointId = checkpointMetaData.getCheckpointId();
         try {
-            acknowledgedState = TaskStateSnapshotDeser.deserializeTaskStateSnapshot(acknowledgedStateJson, getOmniTask());
-            localState = TaskStateSnapshotDeser.deserializeTaskStateSnapshot(localStateJson, getOmniTask());
+            acknowledgedState = TaskStateSnapshotDeser.deserializeTaskStateSnapshot(acknowledgedStateJson,
+                getOmniTask(), checkpointId);
+            localState = TaskStateSnapshotDeser.deserializeTaskStateSnapshot(localStateJson, getOmniTask(),
+                checkpointId);
         } catch (GeneralRuntimeException | JsonProcessingException e) {
             throw new FlinkRuntimeException(e);
         }

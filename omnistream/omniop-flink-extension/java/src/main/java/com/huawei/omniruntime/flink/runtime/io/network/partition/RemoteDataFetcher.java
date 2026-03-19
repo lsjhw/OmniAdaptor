@@ -70,7 +70,7 @@ public class RemoteDataFetcher implements Runnable {
             try {
                 boolean hasDataSent = sendData();
                 if (!hasDataSent) {
-                    Thread.sleep(100);
+                    Thread.sleep(10);
                 }
             } catch (InterruptedException e) {
                 LOG.error("Error sleeping", e);

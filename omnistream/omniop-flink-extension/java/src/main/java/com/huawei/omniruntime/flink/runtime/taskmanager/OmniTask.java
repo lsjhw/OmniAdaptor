@@ -264,13 +264,13 @@ public class OmniTask extends Task {
         return taskStateManagerWrapper;
     }
 
-    public CheckpointStreamFactory getCheckpointStreamFactory(long checkpointId) {
+    public CheckpointStreamFactory getCheckpointStreamFactory(long checkpointId) throws IOException {
         final CheckpointStorageAccess checkpointAccess = ((StreamTask<?, ?>) this.invokable).getEnvironment().getCheckpointStorageAccess();
         try {
             return checkpointAccess.resolveCheckpointStorageLocation(checkpointId, this.checkpointOptions.getTargetLocation());
         } catch (IOException e) {
             LOG.error("Could not resolve the checkpoint storage location.", e);
-            throw new RuntimeException(e);
+            throw e;
         }
     }
     /**

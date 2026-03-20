@@ -264,6 +264,15 @@ public class OmniTask extends Task {
         return taskStateManagerWrapper;
     }
 
+    public CheckpointStreamFactory getCheckpointStreamFactory(long checkpointId) throws IOException {
+        final CheckpointStorageAccess checkpointAccess = ((StreamTask<?, ?>) this.invokable).getEnvironment().getCheckpointStorageAccess();
+        try {
+            return checkpointAccess.resolveCheckpointStorageLocation(checkpointId, this.checkpointOptions.getTargetLocation());
+        } catch (IOException e) {
+            LOG.error("Could not resolve the checkpoint storage location.", e);
+            throw e;
+        }
+    }
     /**
      * The core work method that bootstraps the task and executes its code.
      */
@@ -571,10 +580,11 @@ public class OmniTask extends Task {
 
             // create RemoteDataFetcher for remote input channelsE
 
-            originalTaskDataFetcher = createAndStartRemoteDataFetcher(inputGates);
-
             // call native restore and invoke before java
             long status = doRunRestoreNativeTask(nativeTaskRef, nativeStreamTask);
+            LOG.error("begin createAndStartRemoteDataFetcher ");
+            originalTaskDataFetcher = createAndStartRemoteDataFetcher(inputGates);
+            LOG.error("end createAndStartRemoteDataFetcher ");
             if (!transitionState(ExecutionState.INITIALIZING, ExecutionState.RUNNING)) {
                 throw new CancelTaskException();
             }

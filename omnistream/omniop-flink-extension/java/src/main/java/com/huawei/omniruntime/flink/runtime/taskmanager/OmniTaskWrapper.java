@@ -61,6 +61,9 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.io.OutputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -396,6 +399,45 @@ public class OmniTaskWrapper {
             return handles;
         } catch (Exception e) {
             throw new IOException("Failed to upload files to checkpointFs", e);
+        }
+    }
+
+    public boolean callDownloadFileToLocal(StreamStateHandle restoreFileHandle, Path restoreTargetPath)
+        throws IOException {
+        FSDataInputStream inputStream = null;
+        OutputStream outputStream = null;
+
+        try {
+            inputStream = restoreFileHandle.openInputStream();
+            if (inputStream == null) {
+                LOG.error("Error: callDownloadFileToLocal: inputStream is null");
+                return false;
+            }
+            Files.createDirectories(restoreTargetPath.getParent());
+            outputStream = Files.newOutputStream(restoreTargetPath);
+            if (outputStream == null) {
+                LOG.error("Error: callDownloadFileToLocal: outputStream is null");
+                return false;
+            }
+
+            byte[] buffer = new byte[8 * 1024];
+            while (true) {
+                int numBytes = inputStream.read(buffer);
+                if (numBytes == -1) {
+                    break;
+                }
+
+                outputStream.write(buffer, 0, numBytes);
+            }
+            return true;
+        } finally {
+            if (inputStream != null) {
+                inputStream.close();
+            }
+
+            if (outputStream != null) {
+                outputStream.close();
+            }
         }
     }
 

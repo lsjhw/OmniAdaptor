@@ -55,7 +55,7 @@ class FunctionParser:
             if func.get("hash_agg_func"):
                 self.partial_func_mapping[func["func_name"]] = func["hash_agg_func"]
 
-    def parse_event(self, event):
+    def parse_event(self, event, column_type):
         """
         单事件表达式、函数解析核心逻辑
         :return:
@@ -64,6 +64,7 @@ class FunctionParser:
             return []
         analysis_result = []
         param_type_mapping = {}
+        param_type_mapping.update(column_type)
         physical_plan = event.get("physical plan")
         if not physical_plan:
             return []

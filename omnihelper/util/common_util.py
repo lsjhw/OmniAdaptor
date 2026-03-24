@@ -11,7 +11,6 @@
 import os
 import re
 import sys
-from omnihelper.parser.type_matcher import TypeMatcher, TypeEnum
 
 
 class CommonUtil:
@@ -161,6 +160,7 @@ class CommonUtil:
             op_output_rows='',
             func_name='',
             func_inputs='',
+            not_supported_line='',
             func_times='',
             is_udf = '',
             spark_version='',
@@ -182,6 +182,7 @@ class CommonUtil:
             op_output_rows: 算子输出行数
             func_name: 函数名称
             func_inputs: 函数输入列表
+            not_supported_line: 嵌套函数所在行内容
             func_times: 函数出现次数
             is_udf: 是否为用户自定义函数
 
@@ -194,6 +195,8 @@ class CommonUtil:
             op_outputs = []
         if func_inputs is None:
             func_inputs = []
+        if not_supported_line is None:
+            not_supported_line = []
 
         result_item = {
             'ApplicationID+SQL ID': app_id,
@@ -213,6 +216,7 @@ class CommonUtil:
         result_item.update({
             'Omni不支持的表达式/内置函数名称': func_name,
             'Omni不支持的表达式/内置函数Input': ",".join(func_inputs),
+            'Omni不支持的表达式/内置函数嵌套内容': "\n".join(not_supported_line),
             'Omni不支持的表达式/内置函数出现频次': func_times,
             'Omni不支持的表达式/内置函数是否udf': is_udf,
             'Spark版本': spark_version,
@@ -245,30 +249,3 @@ class CommonUtil:
             items.append(last_item)
 
         return items
-
-    @staticmethod
-    def parse_param_list(param_match, param_type_mapping):
-        """
-        解析输入列表，处理包含嵌套括号的复杂表达式
-        :param param_match: 正则匹配结果对象
-        :param param_type_mapping: 参数类型映射字典
-        :return: 解析后的输入列表
-        """
-        if not param_match:
-            return []
-
-        param_list = []
-        for item in CommonUtil.split_complex_items(param_match.group(1)):
-            stripped_item = item.strip()
-            if not stripped_item:
-                continue
-
-            # 处理 AS 语法，只取左边部分
-            if ' AS ' in stripped_item:
-                stripped_item = stripped_item.split(' AS ')[0].strip()
-
-            param_type = TypeMatcher.judge_param_type(stripped_item, param_type_mapping)
-            if param_type.upper().startswith("DECIMAL"):
-                param_type = TypeEnum.DECIMAL.value
-            param_list.append(param_type)
-        return param_list

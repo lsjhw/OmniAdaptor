@@ -17,6 +17,7 @@ class TypeEnum(Enum):
     INT = "INT"
     SHORT = "SHORT"
     LONG = "LONG"
+    FLOAT = "FLOAT"
     DOUBLE = "DOUBLE"
     MAP = "MAP"
     NULL = "NULL"

@@ -8,6 +8,9 @@
    MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
    See the Mulan PSL v2 for more details.
 """
+from omnihelper.enum.type_enum import TypeEnum
+
+NOT_SUPPORTED_TYPE = [TypeEnum.PARTITION.value, TypeEnum.NESTED_FUNCTIONS.value]
 
 def extract_cast_param(call):
     call = call.strip()
@@ -26,3 +29,16 @@ def extract_cast_param(call):
             right = inner[i + 3:].strip()
             return [left, right]
     return []
+
+def replace_predicate_partition(args):
+    # 找到第一个支持类型
+    supported = None
+    for arg in args:
+        if arg not in NOT_SUPPORTED_TYPE and arg != TypeEnum.NULL.value:
+            supported = arg
+            break
+
+    if supported is None:
+        return args
+
+    return [supported] * len(args)

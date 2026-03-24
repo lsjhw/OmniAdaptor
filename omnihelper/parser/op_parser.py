@@ -174,7 +174,7 @@ class OpParser:
             # 提取输入列表
             input_pattern = re.compile(r'Input\s*\[\d+\]:\s*\[([^\]]+)\]')
             input_match = input_pattern.search(block)
-            input_list = CommonUtil.parse_param_list(input_match, param_type_mapping)
+            input_list = TypeMatcher.parse_param_list(input_match, param_type_mapping)
             is_supported_op = self.evaluate_support_status(opname, input_list)
             if is_supported_op:
                 continue
@@ -183,7 +183,7 @@ class OpParser:
             opname = self.opname_mapping.get(opname)
             output_pattern = re.compile(r'Output\s*\[\d+\]:\s*\[([^\]]+)\]')
             output_match = output_pattern.search(block)
-            output_list = CommonUtil.parse_param_list(output_match, param_type_mapping)
+            output_list = TypeMatcher.parse_param_list(output_match, param_type_mapping)
 
             # 构建time字符串
             time_str_parts = []

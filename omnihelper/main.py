@@ -246,6 +246,7 @@ Usage Examples:
                 for i in range(max_list_length):
                     func_name = expr_event_result[i].get('func_name', '') if i < len(expr_event_result) else ''
                     func_inputs = expr_event_result[i].get('input', []) if i < len(expr_event_result) else []
+                    not_supported_line = expr_event_result[i].get('not_supported_line', []) if i < len(expr_event_result) else []
                     func_times = expr_event_result[i].get('times', 0) if i < len(expr_event_result) else ''
                     is_udf = ''
                     if i < len(expr_event_result):
@@ -262,7 +263,8 @@ Usage Examples:
                     result_item = CommonUtil.build_result_item(self.args.show_op_details, app_id, sql_hash,
                                                                op_name, op_inputs, op_outputs, op_times,
                                                                op_running_time, op_output_sizes, op_output_rows,
-                                                               func_name, func_inputs, func_times, is_udf)
+                                                               func_name, func_inputs, not_supported_line,
+                                                               func_times, is_udf)
                     analysis_result.append(result_item)
 
             self.analysis_result.extend(analysis_result)

@@ -107,6 +107,103 @@ OmniHelper 主要应用于大数据平台设计的日志分析，通过高效分
 - 支持单文件或目录输入（注意需要通过参数配置输出算子信息且不进行日志截断）
 - 日志文件格式支持.lz4/.zstd/纯文本格式
 
+4、准备Spark表结构信息，为工具提供列类型相关输入，提升识别的准确性。导出后放到工具的resources目录下，文件名为spark_table_schema.csv，文件中需要包含full_table_name,column_name,data_type三列，分别对应表名、列名和列类型，其中表名使用数据库名+"."+表名的格式，列类型如果含有逗号，需要放到双引号中。
+
+例如：
+```
+full_table_name,column_name,data_type
+test_db.table1,column1,bigint
+test_db.table1,column2,double
+test_db.table1,column3,"map<string,string>"
+test_db3.table2,column1,"decimal(20,4)"
+```
+
+可参考使用pyspark导出表结构的脚本，需要安装pyspark：`pip3 install pyspark==3.4.3`，版本号根据使用的spark版本号修改：
+```python
+import csv
+import os
+from pyspark.sql import SparkSession
+
+def export_spark_schema_to_csv(output_path):
+    """
+    导出Spark所有数据库的表结构到本地CSV文件
+    """
+    print("正在初始化 SparkSession...")
+    # 初始化 SparkSession
+    spark = SparkSession.builder.appName("ExportSparkSchema").enableHiveSupport().getOrCreate()
+
+    print("开始获取数据库列表...")
+    # 获取所有数据库
+    databases = spark.catalog.listDatabases()
+    
+    rows_data = []
+    
+    total_dbs = len(databases)
+    print(f"共发现 {total_dbs} 个数据库，开始遍历...")
+
+    for db_index, db in enumerate(databases):
+        db_name = db.name
+        print(f"[{db_index + 1}/{total_dbs}] 正在处理数据库: {db_name}")
+        
+        try:
+            # 获取当前数据库下的所有表
+            tables = spark.catalog.listTables(db_name)
+            
+            if not tables:
+                continue
+
+            for table in tables:
+                # 构造完整的表名 (数据库.表名)
+                full_table_name = f"{db_name}.{table.name}"
+                
+                # 获取该表的列信息
+                # listColumns 返回的是 List[Column]，包含 name, dataType, nullable 等属性
+                columns = spark.catalog.listColumns(table.name, db_name)
+                
+                for col in columns:
+                    rows_data.append({
+                        "full_table_name": full_table_name,
+                        "column_name": col.name,
+                        "data_type": col.dataType
+                    })
+                    
+        except Exception as e:
+            print(f"处理数据库 {db_name} 时出错: {str(e)}")
+            continue
+
+    print(f"数据收集完成，共收集到 {len(rows_data)} 条列信息。")
+    
+    # 写入本地CSV文件
+    print(f"正在写入本地文件: {output_path} ...")
+    try:
+        with open(output_path, mode='w', newline='', encoding='utf-8') as csvfile:
+            fieldnames = ['full_table_name', 'column_name', 'data_type']
+            writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            
+            # 写入表头
+            writer.writeheader()
+            # 写入数据行
+            writer.writerows(rows_data)
+            
+        print("导出成功！")
+        
+    except IOError as e:
+        print(f"文件写入失败: {e}")
+
+    # 结束 SparkSession
+    spark.stop()
+
+if __name__ == "__main__":
+    # 定义输出文件路径
+    output_file = "spark_table_schema.csv"
+    
+    # 检查文件是否已存在，避免追加写入混乱
+    if os.path.exists(output_file):
+        os.remove(output_file)
+        
+    export_spark_schema_to_csv(output_file)
+```
+
 ## 快速入门<a name="ZH-CN_TOPIC_0000002547258201"></a>
 
 ### 使用方法<a name="ZH-CN_TOPIC_0000002547269013"></a>

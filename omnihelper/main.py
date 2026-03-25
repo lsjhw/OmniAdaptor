@@ -8,12 +8,15 @@
    MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
    See the Mulan PSL v2 for more details.
 """
+import csv
 import os
 import re
 import sys
 import json
 import time
 import hashlib
+from collections import defaultdict
+
 import pandas as pd
 import argparse
 import subprocess
@@ -22,6 +25,7 @@ from pathlib import Path
 from datetime import datetime
 from omnihelper.parser.function_parser import FunctionParser
 from omnihelper.parser.op_parser import OpParser
+from omnihelper.parser.type_matcher import TypeMatcher
 from omnihelper.util.common_util import CommonUtil
 from omnihelper.util.excel_util import ExcelWriterWithStyle
 
@@ -31,6 +35,7 @@ class LogParser:
     TIMESTAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
     TMP_PATH = os.path.join(EXECUTE_PATH, "tmp", TIMESTAMP)
     FILE_PATTERN = re.compile(r".*(application_|local-)[0-9]+(_[0-9])*.*(\\.lz4|\\.zstd)?$")
+    TABLE_SCHEMA_PATH = os.path.join(EXECUTE_PATH, "resources", "spark_table_schema.csv")
 
     def __init__(self):
         self.parser = None  # 存储ArgumentParser
@@ -220,6 +225,61 @@ Usage Examples:
 
         return len(self.compressed_files) == len(failed_files)
 
+    @classmethod
+    def read_table_schema(cls):
+        """
+        解析Spark导出的CSV表结构文件
+        """
+        table_schema = defaultdict(list)
+        if not os.path.exists(cls.TABLE_SCHEMA_PATH):
+            return table_schema
+
+        with open(cls.TABLE_SCHEMA_PATH, "r") as f:
+            reader = csv.DictReader(f)
+            required_columns = {'full_table_name', 'column_name', 'data_type'}
+            if not required_columns.issubset(set(reader.fieldnames)):
+                print(f"Failed to read spark_table_schema.csv.")
+                return table_schema
+            for row in reader:
+                table_name = row.get("full_table_name")
+                col_name = row.get("column_name")
+                col_type = row.get("data_type")
+                if not table_name or not col_name or not col_type:
+                    continue
+                column_info = {
+                    "column_name": col_name,
+                    "data_type": col_type
+                }
+                table_schema[table_name].append(column_info)
+
+        return table_schema
+
+    @classmethod
+    def get_column_type(cls, table_schema, physical_plan):
+        """
+        获取物理执行计划中使用的所有表的列类型
+        """
+        column_type = {}
+        patterns = [
+            r"Scan hive (\w+)\.(\w+)",
+            r"Scan orc (\w+)\.(\w+)",
+            r"InsertIntoHiveTable [`]?(\w+)[`]?[.]`?(\w+)`?",
+            r"FileScan \w+ (\w+)\.(\w+)",
+            r"Scan JDBCRelation\((\w+)\.(\w+)\)",
+            r"Scan delta (\w+)\.(\w+)",
+            r"Scan (\w+)\.(\w+) \["
+        ]
+        for pattern in patterns:
+            matches = re.findall(pattern, physical_plan)
+            for match in matches:
+                db_name = match[0]
+                table_name = match[1]
+                if db_name.lower() in ("local", "system", "info"):
+                    continue
+                for column_info in table_schema.get(f"{db_name.lower()}.{table_name.lower()}", []):
+                    column_type[column_info["column_name"].lower()] = column_info["data_type"]
+        return column_type
+
     def parse_json_file(self, file_path: str, application_id):
         try:
             with open(file_path, "r") as f:
@@ -227,19 +287,27 @@ Usage Examples:
         except Exception as e:
             return False, f"Failed to load json file: {file_path}, ex: {e}"
 
+        table_schema = {}
+        try:
+            table_schema = self.read_table_schema()
+        except Exception as e:
+            print(f"Failed to read spark_table_schema.csv: {e}")
+
         try:
             analysis_result = []
             for event in app_data:
+                # 获取物理执行计划中使用的所有表的列类型
+                column_type = self.get_column_type(table_schema, event.get("physical plan"))
                 # 获取sql_hash和app_id信息
                 sql_hash = hashlib.sha256(event.get("original query").encode("utf-8")).hexdigest()[-6:]
                 app_id = application_id + "_" + event.get("executionId")
-                contain_omni_op, op_event_result = self.op_parser.parse_event(event)
+                contain_omni_op, op_event_result = self.op_parser.parse_event(event, column_type)
                 if contain_omni_op:
                     result_item = CommonUtil.build_result_item(self.args.show_op_details, application_id,
                                                                error_info=f"Json file contains omni op")
                     self.analysis_result.append(result_item)
                     return True, f"Json file contains omni op: {file_path}"
-                expr_event_result = self.expr_parser.parse_event(event)
+                expr_event_result = self.expr_parser.parse_event(event, column_type)
                 if not expr_event_result and not op_event_result:
                     continue
                 max_list_length = max(len(op_event_result), len(expr_event_result))

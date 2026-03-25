@@ -43,7 +43,7 @@ class FunctionChecker:
                 # 函数本身不支持
                 return True
             if rule.get("param_count") and len(params) != rule.get("param_count"):
-                # 函数个数不支持
+                # 参数个数不支持
                 return True
             if func_name.lower() == FunctionEnum.CAST.value:
                 return self.check_cast_function(input_type)

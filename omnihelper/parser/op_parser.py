@@ -14,9 +14,8 @@ import os
 import re
 import hashlib
 from collections import defaultdict
-import time
 
-from omnihelper.parser.type_matcher import TypeMatcher, TypeEnum
+from omnihelper.parser.type_matcher import TypeMatcher
 from omnihelper.util.common_util import CommonUtil
 
 
@@ -142,7 +141,7 @@ class OpParser:
 
         return nodes, node_name_mapping
 
-    def parse_event(self, event):
+    def parse_event(self, event, column_type):
         """
         单事件表达式、函数解析核心逻辑
         :return:
@@ -151,6 +150,7 @@ class OpParser:
         node_name_mapping = {}
         analysis_result = []
         param_type_mapping = {}
+        param_type_mapping.update(column_type)
         physical_plan = event.get("physical plan")
         if not physical_plan:
             print("no physical plan")

@@ -143,9 +143,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.Executor;
-import java.util.concurrent.Future;
+import java.util.concurrent.*;
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
@@ -366,6 +364,7 @@ public class OmniTask extends Task {
                 LOG.error("Error during metrics de-registration of task {} ({}).", taskNameWithSubtask, executionId,
                         t);
             }
+            deleteNativeTask(nativeTaskRef);
         }
     }
 
@@ -565,8 +564,10 @@ public class OmniTask extends Task {
             // meantime
             // restore original task first
             nativeTaskMetricGroupRef = createNativeTaskMetricGroup(nativeTaskRef);
-            // register omni metrics
-            omniTaskMetricGroup = registerOmniTaskMetrics();
+            // register omni metrics, code: omniTaskMetricGroup = registerOmniTaskMetrics().
+            // After nativeTask is deleted, the Java side may still call the native interface to obtain
+            // old metric data (which has been deleted and becomes a dangling pointer), causing
+            // TaskManager to coredump. Therefore, omni metric data is temporarily not registered.
 
             if (!transitionState(ExecutionState.DEPLOYING, ExecutionState.INITIALIZING)) {
                 throw new CancelTaskException();
@@ -1295,6 +1296,25 @@ public class OmniTask extends Task {
     private native long doRunRestoreNativeTask(long nativeTaskRef, long streamTaskRef /* possible other parameter*/);
 
     private native long doRunInvokeNativeTask(long nativeTaskRef, long streamTaskRef /* possible other parameter */);
+
+    private void deleteNativeTask(long nativeTaskToBeDeleted) {
+        if (nativeTaskToBeDeleted != 0) {
+            ExecutorService deleteNativeTaskExecutorService = Executors.newSingleThreadExecutor();
+            deleteNativeTaskExecutorService.submit(() -> {
+                long delay = 120;
+                LOG.info("Delete native task {} after {} seconds.", nativeTaskToBeDeleted, delay);
+                try {
+                    Thread.sleep(delay * 1000);
+                } catch (InterruptedException e) {
+                    LOG.error("Interrupted while waiting to delete native task {}", nativeTaskToBeDeleted, e);
+                }
+                doDeleteNativeTask(nativeTaskToBeDeleted);
+                LOG.info("Native task {} has been deleted.", nativeTaskToBeDeleted);
+            });
+        }
+    }
+
+    private native void doDeleteNativeTask(long nativeTaskRef);
 
     private native void dispatchOperatorEvent(long nativeTaskRef, String operatorId, String eventDesc);
 

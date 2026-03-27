@@ -478,7 +478,8 @@ public class OmniCreditBasedSequenceNumberingViewReader
     public void stop() {
         running = false;
         int res = checkIfDataAvailableAndNotifyNetty();
-        while (res > 0) {
+        int retryCount = 0;
+        while (res > 0 && retryCount++ < 5) {
             LOG.info("OmniCreditBasedSequenceNumberingViewReader of {}## "
                             + "{}............................find data during stop......data size= "
                             + "{}................................",
@@ -490,6 +491,11 @@ public class OmniCreditBasedSequenceNumberingViewReader
                 throw new RuntimeException(e);
             }
             res = checkIfDataAvailableAndNotifyNetty();
+        }
+
+        if (res > 0) {
+            LOG.warn("There are still {} data available after stop, taskName: {}, partitionId: {}, subPartitionIndex: {}",
+                    res, taskName.substring(0, 15), partitionId, subPartitionIndex);
         }
 
         NativeBufferRecycler.unRegisterInstance(nativeCreditBasedSequenceNumberingViewReaderRef);

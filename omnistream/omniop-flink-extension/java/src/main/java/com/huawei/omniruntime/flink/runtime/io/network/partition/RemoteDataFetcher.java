@@ -207,7 +207,7 @@ public class RemoteDataFetcher implements Runnable {
                         Buffer buffer = waitingForRecycleBuffers.remove(address);
                         if (buffer != null) {
                             buffer.recycleBuffer();
-                            LOG.info("Buffer has been recycled, buffer address: {}, buffer clazz: {}, buffer type: {}, " +
+                            LOG.debug("Buffer has been recycled, buffer address: {}, buffer clazz: {}, buffer type: {}, " +
                                             "size of buffers waiting to be recycled: {}",
                                     address, buffer.getClass().getSimpleName(),
                                     buffer.getDataType().toString(), waitingForRecycleBuffers.size());

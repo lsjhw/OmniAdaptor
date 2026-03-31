@@ -259,6 +259,7 @@ Usage Examples:
         获取物理执行计划中使用的所有表的列类型
         """
         column_type = {}
+        tables = set()
         patterns = [
             r"Scan hive (\w+)\.(\w+)",
             r"Scan orc (\w+)\.(\w+)",
@@ -268,15 +269,29 @@ Usage Examples:
             r"Scan delta (\w+)\.(\w+)",
             r"Scan (\w+)\.(\w+) \["
         ]
-        for pattern in patterns:
-            matches = re.findall(pattern, physical_plan)
-            for match in matches:
-                db_name = match[0]
-                table_name = match[1]
-                if db_name.lower() in ("local", "system", "info"):
+        lines = physical_plan.split("\n")
+        for index, line in enumerate(lines):
+            if not line.strip():
+                continue
+            for pattern in patterns:
+                matches = re.findall(pattern, physical_plan)
+                for match in matches:
+                    db_name = match[0]
+                    table_name = match[1]
+                    if db_name.lower() in ("local", "system", "info"):
+                        continue
+                    tables.add(f"{db_name.lower()}.{table_name.lower()}")
+            if re.search(r"\(\d{1,6}\)\s+LogicalRelation", line):
+                try:
+                    for match in re.findall(r"`([a-zA-Z0-9_]+)`\.`([a-zA-Z0-9_]+)`", lines[index + 1]):
+                        db_name = match[0]
+                        table_name = match[1]
+                        tables.add(f"{db_name.lower()}.{table_name.lower()}")
+                except IndexError:
                     continue
-                for column_info in table_schema.get(f"{db_name.lower()}.{table_name.lower()}", []):
-                    column_type[column_info["column_name"].lower()] = column_info["data_type"]
+        for table_full_name in tables:
+            for column_info in table_schema.get(table_full_name, []):
+                column_type[column_info["column_name"].lower()] = column_info["data_type"]
         return column_type
 
     def parse_json_file(self, file_path: str, application_id):

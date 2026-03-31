@@ -162,11 +162,11 @@ public class RemoteDataFetcher implements Runnable {
                         }
                         long bufferAddress = buffer.getMemorySegment().getAddress();
                         int readIndex = buffer.getReaderIndex();
-                        
+
+                        waitingForRecycleBuffers.put(bufferAddress, buffer);
                         this.notifyRemoteDataAvailable(nativeTaskRef, inputGateIndex, channelIndex, bufferAddress,
                                 bufferLength, readIndex,sequenceNumber, isBuffer, bufferType);
-                        
-                        recycleBuffer(bufferAddress, buffer);
+
                         hasData = true;
                     }
                 } catch (IOException | RuntimeException | InterruptedException e) {
@@ -177,14 +177,7 @@ public class RemoteDataFetcher implements Runnable {
         }
         return hasData;
     }
-    
-    public void recycleBuffer(long address, Buffer buffer) {
-        if (!(buffer instanceof EventBuffer)) {
-            buffer.recycleBuffer();
-        } else {
-            waitingForRecycleBuffers.put(address, buffer);
-        }
-    }
+
     public List<OmniRemoteInputChannel> getRemoteInputChannels() {
         return remoteInputChannels;
     }
@@ -216,7 +209,7 @@ public class RemoteDataFetcher implements Runnable {
                                 LOG.info("Received special address -9999, indicating no buffer to recycle.");
                                 break;
                             }
-                            LOG.warn("No buffer found for address: {}", address);
+                            LOG.error("No buffer found for address: {}", address);
                         }
                     }
                 }
@@ -266,7 +259,7 @@ public class RemoteDataFetcher implements Runnable {
      * @param sequenceNumber sequenceNumber
      */
     public native void notifyRemoteDataAvailable(long nativeTaskRef, int inputGateIndex, int channelIndex,
-            long bufferAddress, int bufferLength, int readIndex,int sequenceNumber, boolean isBuffer,int bufferType);
+            long bufferAddress, int bufferLength, int readIndex, int sequenceNumber, boolean isBuffer, int bufferType);
     
     public native long getRecycleBufferAddress(long nativeTaskRef);
 

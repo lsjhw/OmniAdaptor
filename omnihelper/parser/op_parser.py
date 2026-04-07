@@ -15,6 +15,7 @@ import re
 import hashlib
 from collections import defaultdict
 
+from omnihelper.parser.function_builder import FunctionBuilder
 from omnihelper.parser.type_matcher import TypeMatcher
 from omnihelper.util.common_util import CommonUtil
 
@@ -22,6 +23,8 @@ from omnihelper.util.common_util import CommonUtil
 class OpParser:
     MAPPING_PATH = os.path.join(CommonUtil.get_execute_path(), "resources", "omni_opname_mapping_dictionary.json")
     DICTIONARY_PATH = os.path.join(CommonUtil.get_execute_path(), "resources", "omni_op_dictionary.json")
+    FUNC_DICTIONARY_PATH = os.path.join(CommonUtil.get_execute_path(), "resources", "omni_function_dictionary.json")
+    UDF_DICTIONARY_PATH = os.path.join(CommonUtil.get_execute_path(), "resources", "udf_dictionary.json")
 
     def __init__(self):
         self.opname_mapping = {}
@@ -30,6 +33,27 @@ class OpParser:
 
         self._load_op_mapping()
         self._load_op_dictionary()
+        self.function_builder = None
+        self._load_func_list()
+
+    def _load_func_list(self):
+        try:
+            with open(self.FUNC_DICTIONARY_PATH, "r", encoding="utf-8") as f:
+                function_list = json.load(f)
+        except Exception as e:
+            raise Exception("Failed to load the functions list: " + str(e))
+
+        if os.path.exists(self.UDF_DICTIONARY_PATH):
+            try:
+                with open(self.UDF_DICTIONARY_PATH, "r", encoding="utf-8") as f:
+                    udf_list = json.load(f)
+            except Exception as e:
+                raise Exception("Failed to load the user defined function: " + str(e))
+        omni_functions = [func.get("func_name").lower() for func in function_list]
+        user_defined_functions = [func.get("func_name").lower() for func in udf_list]
+        all_funcs = omni_functions + user_defined_functions
+        func_pattern = re.compile("({})\\((.*)".format("|".join(map(re.escape, all_funcs))), re.I)
+        self.function_builder = FunctionBuilder(func_pattern, all_funcs)
 
     def _load_op_mapping(self):
         try:
@@ -150,6 +174,7 @@ class OpParser:
         node_name_mapping = {}
         analysis_result = []
         param_type_mapping = {}
+        alias_map = {}
         param_type_mapping.update(column_type)
         physical_plan = event.get("physical plan")
         if not physical_plan:
@@ -160,6 +185,9 @@ class OpParser:
             nodes, node_name_mapping = self._process_node_metrics(event.get("node metrics"))
         update_physical_plan = self.preprocess_physical_plan(physical_plan)
         sql_hash = hashlib.sha256(event.get("original query").encode("utf-8")).hexdigest()[-6:]
+        split_phy_plan = physical_plan.split("\n")
+        for line in split_phy_plan:
+            CommonUtil.extract_alias_map(line, alias_map)
         for index, block in enumerate(update_physical_plan):
             if "ReadSchema" in block:
                 # 更新参数类型映射表
@@ -174,7 +202,8 @@ class OpParser:
             # 提取输入列表
             input_pattern = re.compile(r'Input\s*\[\d+\]:\s*\[([^\]]+)\]')
             input_match = input_pattern.search(block)
-            input_list = TypeMatcher.parse_param_list(input_match, param_type_mapping)
+            input_list = TypeMatcher.parse_param_list(input_match, param_type_mapping,
+                                                      alias_map, event, self.function_builder)
             is_supported_op = self.evaluate_support_status(opname, input_list)
             if is_supported_op:
                 continue
@@ -183,7 +212,8 @@ class OpParser:
             opname = self.opname_mapping.get(opname)
             output_pattern = re.compile(r'Output\s*\[\d+\]:\s*\[([^\]]+)\]')
             output_match = output_pattern.search(block)
-            output_list = TypeMatcher.parse_param_list(output_match, param_type_mapping)
+            output_list = TypeMatcher.parse_param_list(output_match, param_type_mapping,
+                                                       alias_map, event, self.function_builder)
 
             # 构建time字符串
             time_str_parts = []

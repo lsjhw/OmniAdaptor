@@ -16,7 +16,7 @@ from omnihelper.enum.type_enum import TypeEnum
 from omnihelper.parser.expr_tree import ExprTree
 from omnihelper.parser.return_type_parser import ReturnTypeParser
 from omnihelper.util.common_util import CommonUtil
-from omnihelper.util.func_util import extract_cast_param, replace_predicate_partition
+from omnihelper.util.func_util import extract_cast_param, replace_predicate_partition, strip_outer_parens
 
 DECIMAL64_PRECISION = [1, 18]
 DECIMAL128_PRECISION = [19, 38]
@@ -64,7 +64,7 @@ class TypeMatcher:
                 param_type_mapping[name.lower()] = par_type
 
     @staticmethod
-    def analyse_op_param_type(param, param_type_mapping):
+    def analyse_op_param_type(param, param_type_mapping, alias_map, event, function_builder):
         if TypeMatcher.is_string_literal(param):
             return TypeEnum.STRING.value
 
@@ -75,6 +75,13 @@ class TypeMatcher:
         ori_param = re.sub(r"^-\s*", "", ori_param)
         if ori_param.lower() in param_type_mapping:
             return TypeMatcher.switch_param_type(param_type_mapping[ori_param.lower()])
+
+        alias_param = re.sub(r"\[\d+\]$", "", param)
+        if alias_param in alias_map:
+            real_param = alias_map[alias_param]
+            real_type = TypeMatcher.analyse_function_param_type(real_param, param_type_mapping, event,
+                                                                function_builder, alias_map, 0)
+            return real_type
         return TypeEnum.PARTITION.value
 
     @staticmethod
@@ -151,8 +158,9 @@ class TypeMatcher:
         nested_function_type = TypeMatcher.get_func_return_type(param, param_type_mapping, event,
                                                                 function_builder, alias_map, depth + 1)
 
-        if nested_function_type in NOT_SUPPORTED_TYPE and param in alias_map:
-            real_param = alias_map[param]
+        alias_param = re.sub(r"\[\d+\]$", "", param)
+        if nested_function_type in NOT_SUPPORTED_TYPE and alias_param in alias_map:
+            real_param = alias_map[alias_param]
             real_type = TypeMatcher.analyse_function_param_type(real_param, param_type_mapping, event,
                                                                 function_builder, alias_map, depth + 1)
             return real_type
@@ -181,7 +189,7 @@ class TypeMatcher:
 
     @staticmethod
     def is_nested_function(param):
-        strip_param = re.sub(r"#\d+(L)*", "", param).strip()
+        strip_param = strip_outer_parens(re.sub(r"#\d+(L)*", "", param)).strip()
         # 判断是否为嵌套函数，字母下划线紧跟(
         return (bool(re.match(r'^[a-zA-Z_]\w*\s*\((.*)\)$', strip_param))
                 or strip_param.lower().startswith(FunctionEnum.IF.value)
@@ -265,7 +273,7 @@ class TypeMatcher:
         for pair in pairs:
             input_type = pair.get("input_type", [])
             if TypeEnum.NESTED_FUNCTIONS.value in input_type:
-                # 如果提取到的函数
+                # 如果函数内包含嵌套函数，先入栈
                 stack.append(pair)
                 continue
             return_type = return_type_parser.analyse_return_type(pair)
@@ -292,7 +300,7 @@ class TypeMatcher:
                 nested_param = params[idx]
                 for func in base_funcs:
                     if func.get("type") == "expr" and func.get("func") == FunctionEnum.IN.value:
-                            continue
+                        continue
                     if func.get("func") in nested_param and all(param in nested_param for param in func.get("params")):
                         # 通过已经获取到返回值的函数参数中，找到包含该函数的嵌套函数，并将其赋值
                         input_type[idx] = func.get("return_type")
@@ -313,13 +321,16 @@ class TypeMatcher:
         pairs.extend(duplicate_return_types)
 
         if is_nested_function:
-            outer_func_name = TypeMatcher.find_outer_func_name(ori_param)
+            # 如果原始参数是函数
+            outer_func_name = TypeMatcher.find_outer_func_name(strip_outer_parens(ori_param))
             if outer_func_name:
                 filtered = [pair for pair in pairs if pair.get("func") == outer_func_name]
                 if filtered:
+                    # 匹配到函数名相同，参数名最长的pair
                     filtered_pair = max(filtered, key=lambda x:len("".join(x["params"])))
                     nested_function_type = filtered_pair.get("return_type", TypeEnum.NESTED_FUNCTIONS.value)
         else:
+            # 如果原始参数是表达式
             for pair in pairs:
                 func_name = pair.get("func")
                 params = pair.get("params")
@@ -346,7 +357,7 @@ class TypeMatcher:
         return outer_func_name
 
     @staticmethod
-    def parse_param_list(param_match, param_type_mapping):
+    def parse_param_list(param_match, param_type_mapping, alias_map, event, function_builder):
         """
         解析输入列表，处理包含嵌套括号的复杂表达式
         :param param_match: 正则匹配结果对象
@@ -366,7 +377,7 @@ class TypeMatcher:
             if ' AS ' in stripped_item:
                 stripped_item = stripped_item.split(' AS ')[0].strip()
 
-            param_type = TypeMatcher.analyse_op_param_type(stripped_item, param_type_mapping)
+            param_type = TypeMatcher.analyse_op_param_type(stripped_item, param_type_mapping, alias_map, event, function_builder)
             if param_type.upper().startswith("DECIMAL"):
                 param_type = TypeEnum.DECIMAL.value
             param_list.append(param_type)

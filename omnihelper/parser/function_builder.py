@@ -12,7 +12,7 @@ import re
 
 
 from omnihelper.enum.function_enum import FunctionEnum
-from omnihelper.util.func_util import extract_cast_param
+from omnihelper.util.func_util import extract_cast_param, strip_outer_parens
 
 # 在函数提取中需要排除的表达式
 EXCLUDED_EXPRS = [FunctionEnum.IF.value, FunctionEnum.CASE.value, FunctionEnum.IN.value]
@@ -65,10 +65,10 @@ class FunctionBuilder:
                 continue
             if op.lower() in EXCLUDED_FUNCTIONS:
                 continue
-            left_param = self.strip_outer_parens(self.extract_left_param(left))
+            left_param = strip_outer_parens(self.extract_left_param(left))
             params.append(left_param)
 
-            right_param = self.strip_outer_parens(self.extract_right_param(right))
+            right_param = strip_outer_parens(self.extract_right_param(right))
             if not op.lower() == FunctionEnum.IN.value:
                 # in表达式只需要提取一边的类型
                 params.append(right_param)
@@ -78,17 +78,20 @@ class FunctionBuilder:
             if re.fullmatch(r"^\s*(?::\s*)*(?:\+\-|\:\-|\-)\s*$", left_param):
                 # 排除类似【+- * Project (32)】左边参数是+-，: +-，: :-等情况
                 continue
+            if left_param == "Expression" and op == "=":
+                # 排除类似【Subquery:Hosting Expression = ...】的情况
+                continue
 
             func_expr_pairs.append({"func": op.lower(), "params": params, "type": "expr"})
 
     def extract_special_func(self, line, func_expr_pairs):
         line_low = line.lower()
         if "if (" in line_low:
-            self.extract_if_expressions(line, func_expr_pairs)
+            self.extract_if_func(line, func_expr_pairs)
         if "case when" in line_low:
-            self.extract_case_when_exprs(line, func_expr_pairs)
+            self.extract_case_when_func(line, func_expr_pairs)
 
-    def extract_if_expressions(self, line, func_expr_pairs):
+    def extract_if_func(self, line, func_expr_pairs):
         results = []
         pos = 0
         while pos < len(line):
@@ -140,7 +143,7 @@ class FunctionBuilder:
             cur += 1
 
         # 解析true_expr
-        true_node, cur = self.parse_expr(expr, cur)
+        true_node, cur = self.parse_expr(expr, cur, True)
 
         while cur < n and expr[cur].isspace():
             # 跳过空格
@@ -155,7 +158,7 @@ class FunctionBuilder:
             cur += 1
 
         # 解析false_expr
-        false_node, cur = self.parse_expr(expr, cur)
+        false_node, cur = self.parse_expr(expr, cur, False)
 
         node = {
             "cond": cond,
@@ -165,7 +168,7 @@ class FunctionBuilder:
 
         return node, cur
 
-    def parse_expr(self, expr, pos):
+    def parse_expr(self, expr, pos, is_true_node):
         n = len(expr)
 
         # 如果是if，递归
@@ -184,7 +187,9 @@ class FunctionBuilder:
                 if depth == 0:
                     break
                 depth -= 1
-            elif depth == 0 and (expr[cur:cur + 4].lower() == "else" or expr[cur] in "],"):
+            elif depth == 0 and expr[cur] in "],":
+                break
+            elif depth == 0 and is_true_node and expr[cur:cur + 4].lower() == "else":
                 break
             cur += 1
 
@@ -249,7 +254,7 @@ class FunctionBuilder:
 
         return values
 
-    def extract_case_when_exprs(self, line, func_expr_pairs):
+    def extract_case_when_func(self, line, func_expr_pairs):
         line_low = line.lower()
         n = len(line)
         start = 0
@@ -266,12 +271,12 @@ class FunctionBuilder:
                 if line_low.startswith(" then ", pos):
                     st = pos + 6
                     ed = self.skip_expr(line_low, st, line)
-                    res.append(self.strip_outer_parens(line[st:ed].strip()))
+                    res.append(strip_outer_parens(line[st:ed].strip()))
                     pos = ed
                 elif line_low.startswith(" else ", pos):
                     st = pos + 6
                     ed = self.skip_expr(line_low, st, line)
-                    res.append(self.strip_outer_parens(line[st:ed].strip()))
+                    res.append(strip_outer_parens(line[st:ed].strip()))
                     pos = ed
                 elif line_low.startswith(" end", pos):
                     start = i + 9  # 从当前case when后开始找下一个
@@ -388,6 +393,50 @@ class FunctionBuilder:
         return results
 
     def extract_left_param(self, left_part):
+        if left_part.rstrip().endswith("END"):
+            return self.extract_case_when_param(left_part)
+
+        return self.extract_base_left_param(left_part)
+
+    def extract_case_when_param(self, expr):
+        """
+        从右向左提取完整 CASE WHEN ... END表达式
+        """
+        expr = expr.rstrip()
+        n = len(expr)
+
+        # 1. 先找到最右边的END
+        end_pos = None
+        for k in range(n - 1, -1, -1):
+            if k >= 2 and expr[k - 2:k + 1].lower() == "end":
+                end_pos = k + 1
+                break
+        if end_pos is None:
+            return "END"
+
+        i = end_pos - 4
+        depth = 0
+
+        while i >= 0:
+            if i >= 2 and expr[i -2:i + 1].lower() == "end":
+                depth += 1
+                i -= 3
+                continue
+
+            if i >= 3 and expr[i - 3:i + 1].lower() == "case":
+                if depth == 0:
+                    case_start = i - 3
+                    return expr[case_start:end_pos].strip()
+                else:
+                    depth -= 1
+                    i -= 4
+                    continue
+
+            i -= 1
+
+        return "END"
+
+    def extract_base_left_param(self, left_part):
         """
         返回表达式左边最靠近的参数或函数：
         - 支持函数调用：rand(..)等
@@ -474,21 +523,76 @@ class FunctionBuilder:
 
         return s[i]
 
-    def strip_outer_parens(self, expr):
-        expr = expr.strip()
-        if expr.startswith("(") and expr.endswith(")"):
-            depth = 0
-            for i, ch in enumerate(expr):
-                if ch == "(":
-                    depth += 1
-                elif ch == ")":
-                    depth -= 1
-                    if depth == 0 and i != len(expr) - 1:
-                        return expr
-            return expr[1:-1].strip()
-        return expr
-
     def extract_right_param(self, right_part):
+        """
+        返回表达式右边最靠近的参数或函数
+        :return: 右边参数
+        """
+        if right_part.lower().lstrip().startswith(FunctionEnum.IF.value):
+            return self.extract_if_expr(right_part.lstrip())
+
+        return self.extract_base_param(right_part)
+
+    def extract_if_expr(self, expr):
+        """
+        提取表达式右侧为if函数的完整参数
+        :return: 完整的if函数
+        """
+        i = 2
+        n = len(expr)
+
+        while i < n and expr[i].isspace():
+            i += 1
+
+        if expr[i] != "(":
+            return None
+
+        depth = 0
+        cond_end = None
+        for k in range(i, n):
+            if expr[k] == "(":
+                depth += 1
+            elif expr[k] == ")":
+                depth -= 1
+                if depth == 0:
+                    cond_end = k
+                    break
+
+        pos = cond_end + 1
+
+        while pos < n and expr[pos].isspace():
+            pos += 1
+
+        true_expr, next_pos = self.extract_single_if_expr(expr, pos)
+
+        pos = next_pos
+        while pos < n and expr[pos].isspace():
+            pos += 1
+
+        if not expr.startswith("else", pos):
+            return expr[:next_pos]
+
+        pos += 4
+        while pos < n and expr[pos].isspace():
+            pos += 1
+
+        false_expr, next_pos = self.extract_single_if_expr(expr, pos)
+
+        return expr[:next_pos]
+
+    def extract_single_if_expr(self, expr, pos):
+        sub = expr[pos:].lstrip()
+        offset = len(expr[pos:]) - len(sub)
+        pos += offset
+
+        if sub.lower().startswith(FunctionEnum.IF.value):
+            expr = self.extract_if_expr(sub)
+            return expr, pos + len(expr)
+
+        expr = self.extract_base_param(sub)
+        return expr, pos + len(expr)
+
+    def extract_base_param(self, right_part):
         """
         返回表达式右边最靠近的参数或函数
         - 支持函数调用：lower(...), rand(...)

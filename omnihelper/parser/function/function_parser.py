@@ -14,6 +14,7 @@ import re
 import hashlib
 from collections import defaultdict
 
+from omnihelper.parser.cte.parser import CTEParser
 from omnihelper.parser.function.function_builder import FunctionBuilder
 from omnihelper.parser.function.function_checker import FunctionChecker
 from omnihelper.parser.type_matcher import TypeMatcher
@@ -58,7 +59,7 @@ class FunctionParser:
                 self.partial_func_mapping[func["func_name"]] = func["hash_agg_func"]
         self.function_builder = FunctionBuilder(self.func_pattern, self.all_funcs)
 
-    def parse_event(self, event, column_type):
+    def parse_event(self, event, column_type, table_schema):
         """
         单事件表达式、函数解析核心逻辑
         :return:
@@ -74,6 +75,10 @@ class FunctionParser:
             return []
         if event.get("node metrics"):
             TypeMatcher.extract_param_type(event.get("node metrics"), param_type_mapping)
+        ori_sql = event.get("original query")
+        cte_parser = CTEParser()
+        TypeMatcher.cte_subquery_table_mapping = cte_parser.parse(ori_sql)
+        TypeMatcher.table_schema = {table.rsplit(".", 1)[-1]: schema for table, schema in table_schema.items()}
         update_physical_plan = self.preprocess_physical_plan(physical_plan)
         operator_blocks = self.split_operators(update_physical_plan)
 

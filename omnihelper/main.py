@@ -321,7 +321,7 @@ Usage Examples:
                                                                error_info=f"Json file contains omni op")
                     self.analysis_result.append(result_item)
                     return True, f"Json file contains omni op: {file_path}"
-                expr_event_result = self.expr_parser.parse_event(event, column_type)
+                expr_event_result = self.expr_parser.parse_event(event, column_type, table_schema)
                 if not expr_event_result and not op_event_result:
                     continue
                 max_list_length = max(len(op_event_result), len(expr_event_result))

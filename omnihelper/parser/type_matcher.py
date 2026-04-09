@@ -40,6 +40,8 @@ TYPE_PATTERNS = [
 ]
 
 class TypeMatcher:
+    cte_subquery_table_mapping = {}
+    table_schema = {}
 
     @staticmethod
     def extract_param_type(input_data, param_type_mapping):
@@ -106,7 +108,8 @@ class TypeMatcher:
         return input_type
 
     @staticmethod
-    def analyse_function_param_type(param, param_type_mapping, event, function_builder, alias_map, depth):
+    def analyse_function_param_type(param, param_type_mapping, event, function_builder, alias_map, depth,
+                                    is_table_col=False):
         if depth > 10:
             return TypeEnum.PARTITION.value
         ori_sql = event.get("original query")
@@ -157,13 +160,44 @@ class TypeMatcher:
 
         nested_function_type = TypeMatcher.get_func_return_type(param, param_type_mapping, event,
                                                                 function_builder, alias_map, depth + 1)
+        if nested_function_type not in NOT_SUPPORTED_TYPE:
+            return nested_function_type
 
         alias_param = re.sub(r"\[\d+\]$", "", param)
-        if nested_function_type in NOT_SUPPORTED_TYPE and alias_param in alias_map:
+        if alias_param in alias_map:
             real_param = alias_map[alias_param]
             real_type = TypeMatcher.analyse_function_param_type(real_param, param_type_mapping, event,
                                                                 function_builder, alias_map, depth + 1)
-            return real_type
+            if real_type not in NOT_SUPPORTED_TYPE:
+                return real_type
+
+        if is_table_col:
+            # 如果是形如 click_info.hour_period_id 的参数，将别名表的key去掉#id之后再比较
+            re_id_alias_map = {}
+            for alias_key, alias_value in alias_map.items():
+                re_id_alias = re.sub(r"#\d+L?$", "", alias_key)
+                re_id_alias_map[re_id_alias] = alias_value
+            re_id_param = re.sub(r"#\d+(L)*", "", param)
+            if re_id_param in re_id_alias_map:
+                re_id_real_param = re_id_alias_map[re_id_param]
+                real_type = TypeMatcher.analyse_function_param_type(re_id_real_param, param_type_mapping, event,
+                                                                    function_builder, alias_map, depth + 1)
+                if real_type not in NOT_SUPPORTED_TYPE:
+                    return real_type
+
+        pattern = re.compile(r'(?:(\w+)\.)?(\w+)(?:#\d+L?)?')
+        for m in pattern.finditer(param):
+            prefix = m.group(1)
+            col_name = m.group(2)
+            if not prefix or prefix.lower() not in TypeMatcher.cte_subquery_table_mapping:
+                continue
+            use_tables = TypeMatcher.cte_subquery_table_mapping[prefix.lower()]
+            for table in use_tables:
+                for column_info in TypeMatcher.table_schema.get(table, []):
+                    if column_info["column_name"] == col_name:
+                        return TypeMatcher.switch_param_type(column_info["data_type"])
+            return TypeMatcher.analyse_function_param_type(col_name, param_type_mapping, event, function_builder,
+                                                           alias_map, depth + 1, True)
 
         return nested_function_type
 

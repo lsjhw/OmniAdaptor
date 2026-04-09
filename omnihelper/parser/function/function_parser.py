@@ -14,9 +14,9 @@ import re
 import hashlib
 from collections import defaultdict
 
-from omnihelper.enum.type_enum import TypeEnum
-from omnihelper.parser.function_builder import FunctionBuilder
-from omnihelper.parser.function_checker import FunctionChecker
+from omnihelper.parser.cte.parser import CTEParser
+from omnihelper.parser.function.function_builder import FunctionBuilder
+from omnihelper.parser.function.function_checker import FunctionChecker
 from omnihelper.parser.type_matcher import TypeMatcher
 from omnihelper.util.common_util import CommonUtil
 from omnihelper.util.func_util import NOT_SUPPORTED_TYPE
@@ -33,6 +33,8 @@ class FunctionParser:
         self.user_defined_functions = []
         self.partial_func_mapping = {}
         self.all_funcs = []
+        self.func_pattern = ""
+        self.function_builder = None
         self.load_func_list()
 
     def load_func_list(self):
@@ -55,8 +57,9 @@ class FunctionParser:
         for func in self.function_list:
             if func.get("hash_agg_func"):
                 self.partial_func_mapping[func["func_name"]] = func["hash_agg_func"]
+        self.function_builder = FunctionBuilder(self.func_pattern, self.all_funcs)
 
-    def parse_event(self, event, column_type):
+    def parse_event(self, event, column_type, table_schema):
         """
         单事件表达式、函数解析核心逻辑
         :return:
@@ -72,6 +75,10 @@ class FunctionParser:
             return []
         if event.get("node metrics"):
             TypeMatcher.extract_param_type(event.get("node metrics"), param_type_mapping)
+        ori_sql = event.get("original query")
+        cte_parser = CTEParser()
+        TypeMatcher.cte_subquery_table_mapping = cte_parser.parse(ori_sql)
+        TypeMatcher.table_schema = {table.rsplit(".", 1)[-1]: schema for table, schema in table_schema.items()}
         update_physical_plan = self.preprocess_physical_plan(physical_plan)
         operator_blocks = self.split_operators(update_physical_plan)
 
@@ -133,10 +140,9 @@ class FunctionParser:
             if "ReadSchema" in line:
                 # 更新参数类型映射表
                 TypeMatcher.extract_param_type(line, param_type_mapping)
-            self.extract_alias_map(line, alias_map)
-        function_builder = FunctionBuilder(self.func_pattern, self.all_funcs)
+            CommonUtil.extract_alias_map(line, alias_map)
         for line in physical_plan:
-            func_pairs = function_builder.search_func_expr_pairs(line)
+            func_pairs = self.function_builder.search_func_expr_pairs(line)
             if not func_pairs:
                 continue
 
@@ -145,7 +151,7 @@ class FunctionParser:
                 params = pair.get("params")
 
                 input_type = TypeMatcher.get_input_type(params, param_type_mapping, event, pair,
-                                                        function_builder, alias_map, 0)
+                                                        self.function_builder, alias_map, 0)
                 function_checker = FunctionChecker(self.function_list, self.udf_list)
                 is_not_supported_func = function_checker.check_support_status(func_name, params, input_type,
                                                                               event.get("original query"))
@@ -196,14 +202,3 @@ class FunctionParser:
                 "not_supported_params": not_supported_params[(func_name, sql_hash, input_type)]
             })
         return update_event_result
-
-    def extract_alias_map(self, line, alias_map):
-        func_builder = FunctionBuilder("", ["as"])
-        func_expr_pairs = []
-        func_builder.search_exprs(line, func_expr_pairs)
-        for expr in func_expr_pairs:
-            params = expr.get("params")
-            if params[0].upper() in [enum.value for enum in TypeEnum]:
-                continue
-            if params[1] not in alias_map and params[0] != params[1]:
-                alias_map[params[1]] = params[0]

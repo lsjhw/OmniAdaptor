@@ -12,6 +12,9 @@ import os
 import re
 import sys
 
+from omnihelper.enum.spark_type_enum import SparkTypeEnum
+from omnihelper.parser.function.function_builder import FunctionBuilder
+
 
 class CommonUtil:
     @staticmethod
@@ -258,3 +261,15 @@ class CommonUtil:
             items.append(last_item)
 
         return items
+
+    @staticmethod
+    def extract_alias_map(line, alias_map):
+        func_builder = FunctionBuilder("", ["as"])
+        func_expr_pairs = []
+        func_builder.search_exprs(line, func_expr_pairs)
+        for expr in func_expr_pairs:
+            params = expr.get("params")
+            if params[1].lower() in [enum.value for enum in SparkTypeEnum]:
+                continue
+            if params[1] not in alias_map and params[0] != params[1]:
+                alias_map[params[1]] = params[0]

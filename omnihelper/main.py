@@ -23,8 +23,8 @@ import subprocess
 from tqdm import tqdm
 from pathlib import Path
 from datetime import datetime
-from omnihelper.parser.function_parser import FunctionParser
-from omnihelper.parser.op_parser import OpParser
+from omnihelper.parser.function.function_parser import FunctionParser
+from omnihelper.parser.operator.op_parser import OpParser
 from omnihelper.util.common_util import CommonUtil
 from omnihelper.util.excel_util import ExcelWriterWithStyle
 
@@ -321,7 +321,7 @@ Usage Examples:
                                                                error_info=f"Json file contains omni op")
                     self.analysis_result.append(result_item)
                     return True, f"Json file contains omni op: {file_path}"
-                expr_event_result = self.expr_parser.parse_event(event, column_type)
+                expr_event_result = self.expr_parser.parse_event(event, column_type, table_schema)
                 if not expr_event_result and not op_event_result:
                     continue
                 max_list_length = max(len(op_event_result), len(expr_event_result))

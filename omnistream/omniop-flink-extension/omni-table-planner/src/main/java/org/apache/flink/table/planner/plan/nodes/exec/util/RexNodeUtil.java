@@ -93,6 +93,7 @@ public class RexNodeUtil {
         specialOperatorMap.put("AND", SpecialExprType.AND);
         specialOperatorMap.put("OR", SpecialExprType.OR);
         specialOperatorMap.put("IF", SpecialExprType.IF);
+        specialOperatorMap.put("COALESCE", SpecialExprType.COALESCE);
         specialOperatorMap.put("JSON_VALUE", SpecialExprType.JSON_VALUE);
         specialOperatorMap.put("JSON_QUERY", SpecialExprType.JSON_QUERY);
         specialOperatorMap.put("JSON_SPLIT", SpecialExprType.JSON_SPLIT);
@@ -176,6 +177,7 @@ public class RexNodeUtil {
         AND,
         OR,
         IF,
+        COALESCE,
         JSON_VALUE,
         JSON_QUERY,
         JSON_SPLIT
@@ -300,6 +302,37 @@ public class RexNodeUtil {
                         regArgs.add(buildJsonMap(operands.get(2)));
                         jsonMap.put("arguments", regArgs);
                         LOG.info("The expression is {} ", rexCall.toString());
+                        break;
+                    case COALESCE:
+                        if (operands.isEmpty()) {
+                            LOG.warn("COALESCE expects at least 1 argument, but got {}", operands.size());
+                            jsonMap.put("exprType", "INVALID");
+                            break;
+                        }
+
+                        if (operands.size() == 1) {
+                            return buildJsonMap(operands.get(0));
+                        }
+
+                        Map<String, Object> nested = null;
+                        for (int i = operands.size() - 1; i >= 1; i--) {
+                            Map<String, Object> node = new LinkedHashMap<>();
+                            node.put("exprType", "COALESCE");
+                            setDataType(rexCall, node, "returnType");
+                            node.put("value1", buildJsonMap(operands.get(i - 1)));
+                            if (nested == null) {
+                                node.put("value2", buildJsonMap(operands.get(i)));
+                            } else {
+                                node.put("value2", nested);
+                            }
+                            nested = node;
+                        }
+
+                        if (nested != null) {
+                            jsonMap.putAll(nested);
+                        } else {
+                            jsonMap.put("exprType", "INVALID");
+                        }
                         break;
                     case JSON_VALUE:
                         jsonMap.put("exprType", "FUNCTION");

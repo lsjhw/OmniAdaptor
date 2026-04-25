@@ -325,6 +325,15 @@ public class ValidateCalcOPStrategy extends AbstractValidateOperatorStrategy {
 
                 return validateReturnTypeAndArguments(exprMap, inputSize);
 
+            case "COALESCE":
+                if (!exprMap.containsKey("returnType") || !exprMap.containsKey("value1") || !exprMap.containsKey("value2")) {
+                    return false;
+                }
+                if (!validateCalcExprMaps(inputSize, "COALESCE", exprMap.get("value1"), exprMap.get("value2"))) {
+                    return false;
+                }
+                return true;
+
             case "SWITCH_GENERAL":
                 if (!exprMap.containsKey("returnType") || !exprMap.containsKey("numOfCases") || !exprMap.containsKey("else")) {
                     return false;

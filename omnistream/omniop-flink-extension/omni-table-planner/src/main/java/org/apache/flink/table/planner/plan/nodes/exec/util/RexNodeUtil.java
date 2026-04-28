@@ -70,7 +70,7 @@ public class RexNodeUtil {
         RexTypeToIdMap.put("TIME_WITHOUT_TIME_ZONE", 19); // TODO: Is this the same as TIME?
         RexTypeToIdMap.put("TIMESTAMP_WITHOUT_TIME_ZONE", 20); // TODO: Omni's TIMESTAMP uses int64_t, Flink has the possibility of accuracy>3
         RexTypeToIdMap.put("TIMESTAMP_TZ", 21); // TIMESTAMP_WITH_TIMEZONE
-        RexTypeToIdMap.put("TIMESTAMP_WITH_LOCAL_TIME_ZONE", 22);
+        RexTypeToIdMap.put("TIMESTAMP_WITH_LOCAL_TIME_ZONE", 24);
         RexTypeToIdMap.put("ARRAY", 23);
         RexTypeToIdMap.put("MULTISET", 24);
         RexTypeToIdMap.put("MAP", 25);
@@ -93,7 +93,9 @@ public class RexNodeUtil {
         specialOperatorMap.put("AND", SpecialExprType.AND);
         specialOperatorMap.put("OR", SpecialExprType.OR);
         specialOperatorMap.put("IF", SpecialExprType.IF);
+        specialOperatorMap.put("COALESCE", SpecialExprType.COALESCE);
         specialOperatorMap.put("JSON_VALUE", SpecialExprType.JSON_VALUE);
+        specialOperatorMap.put("JSON_QUERY", SpecialExprType.JSON_QUERY);
         specialOperatorMap.put("JSON_SPLIT", SpecialExprType.JSON_SPLIT);
     }
 
@@ -175,7 +177,9 @@ public class RexNodeUtil {
         AND,
         OR,
         IF,
+        COALESCE,
         JSON_VALUE,
+        JSON_QUERY,
         JSON_SPLIT
     }
 
@@ -299,6 +303,37 @@ public class RexNodeUtil {
                         jsonMap.put("arguments", regArgs);
                         LOG.info("The expression is {} ", rexCall.toString());
                         break;
+                    case COALESCE:
+                        if (operands.isEmpty()) {
+                            LOG.warn("COALESCE expects at least 1 argument, but got {}", operands.size());
+                            jsonMap.put("exprType", "INVALID");
+                            break;
+                        }
+
+                        if (operands.size() == 1) {
+                            return buildJsonMap(operands.get(0));
+                        }
+
+                        Map<String, Object> nested = null;
+                        for (int i = operands.size() - 1; i >= 1; i--) {
+                            Map<String, Object> node = new LinkedHashMap<>();
+                            node.put("exprType", "COALESCE");
+                            setDataType(rexCall, node, "returnType");
+                            node.put("value1", buildJsonMap(operands.get(i - 1)));
+                            if (nested == null) {
+                                node.put("value2", buildJsonMap(operands.get(i)));
+                            } else {
+                                node.put("value2", nested);
+                            }
+                            nested = node;
+                        }
+
+                        if (nested != null) {
+                            jsonMap.putAll(nested);
+                        } else {
+                            jsonMap.put("exprType", "INVALID");
+                        }
+                        break;
                     case JSON_VALUE:
                         jsonMap.put("exprType", "FUNCTION");
                         setDataType(rexCall,jsonMap, "returnType");
@@ -326,6 +361,18 @@ public class RexNodeUtil {
                         
                         jsonMap.put("arguments", jsonArgs);
                         LOG.info("The JSON_VALUE expression is {} ", rexCall.toString());
+                        break;
+                    case JSON_QUERY:
+                        jsonMap.put("exprType", "FUNCTION");
+                        setDataType(rexCall, jsonMap, "returnType");
+                        jsonMap.put("function_name", "json_query");
+
+                        List<Map<String, Object>> queryArgs = new ArrayList<>();
+                        queryArgs.add(buildJsonMap(operands.get(0)));
+                        queryArgs.add(buildJsonMap(operands.get(1)));
+
+                        jsonMap.put("arguments", queryArgs);
+                        LOG.info("The JSON_QUERY expression is {} ", rexCall.toString());
                         break;
                     case JSON_SPLIT:
                         // JsonSplit is a ScalarFunction: eval(String input) -> String
@@ -510,7 +557,7 @@ public class RexNodeUtil {
                         break;
                     case PROCTIME:
                         jsonMap.put("exprType", SpecialExprType.PROCTIME);
-                        jsonMap.put("returnType", 22);
+                        jsonMap.put("returnType", RexTypeToIdMap.get(rexCall.getType().getSqlTypeName().toString()));
                         LOG.info("The operator is* {} ", operator.getName());
                         LOG.info("The type is* {} ", rexCall.getType().getSqlTypeName().toString());
                         break;

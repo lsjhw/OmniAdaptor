@@ -530,11 +530,11 @@ public class RexNodeUtil {
                             if (operands.get(1).getType().getSqlTypeName() == SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE) {
                                 jsonMap.put("function_name", "get_hour_with_tz");
                                 Map<String, Object> argMap = new LinkedHashMap<>();
-                                argMap.put("dataType", 2);
+                                argMap.put("dataType", 15);
                                 argMap.put("exprType", "LITERAL");
                                 argMap.put("isNull", false);
-                                ZoneOffset offset = CommonExecCalc.getZoneId().getRules().getOffset(Instant.now());
-                                argMap.put("value", offset.getTotalSeconds());
+                                argMap.put("value", CommonExecCalc.getZoneId().getId());
+                                argMap.put("width", CommonExecCalc.getZoneId().getId().length());
                                 args.add(argMap);
                             } else {
                                 jsonMap.put("function_name", "get_hour");
@@ -610,11 +610,11 @@ public class RexNodeUtil {
                         if (operands.get(0).getType().getSqlTypeName() == SqlTypeName.TIMESTAMP_WITH_LOCAL_TIME_ZONE) {
                             jsonMap.put("function_name", "from_unixtime_with_tz");
                             Map<String, Object> argMap3 = new LinkedHashMap<>();
-                            argMap3.put("dataType", 2);
+                            argMap3.put("dataType", 15);
                             argMap3.put("exprType", "LITERAL");
                             argMap3.put("isNull", false);
-                            ZoneOffset offset = CommonExecCalc.getZoneId().getRules().getOffset(Instant.now());
-                            argMap3.put("value", offset.getTotalSeconds());
+                            argMap3.put("value", CommonExecCalc.getZoneId().getId());
+                            argMap3.put("width", CommonExecCalc.getZoneId().getId().length());
                             argumentsList.add(argMap3);
                         } else {
                             jsonMap.put("function_name", "from_unixtime_without_tz");

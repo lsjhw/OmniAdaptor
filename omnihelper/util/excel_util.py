@@ -27,9 +27,9 @@ class ExcelWriterWithStyle:
         # merged_func_column 同名函数合并项 show_detail 展示算子细节
         self.headers = [
             {'main': 'ApplicationID+SQL ID', "column_width": 35},
-            {'main': 'SQL Hash', "column_width": 10},
+            {'main': 'SQL Hash', "column_width": 10, "merged_op_column": self.DEFAULT_VALUE},
             {'main': 'Omni不支持的算子', 'sub': '名称', 'merge_start': self.DEFAULT_VALUE,
-             "column_width": 20},
+             "column_width": 20, "merged_op_column": self.DEFAULT_VALUE},
             {'main': 'Omni不支持的算子', 'sub': 'Input', "column_width": 35},
             {'main': 'Omni不支持的算子', 'sub': 'Output', "column_width": 35},
             {'main': 'Omni不支持的算子', 'sub': '出现频次', "column_width": 10},
@@ -82,7 +82,7 @@ class ExcelWriterWithStyle:
         print("Start writing to excel...")
 
         try:
-
+            function_start_column = 10 if show_op_details else 8
             if not show_op_details:
                 self.headers = [i for i in self.headers if "show_details" not in i]
 
@@ -116,9 +116,9 @@ class ExcelWriterWithStyle:
                     worksheet,
                     data_cache,
                     start_row=3,
-                    independent_cols=[1, 2, 3],
+                    independent_cols=[1],
                     linked_cols=self.merged_op_column,
-                    control_cols=[1, 2, 3]
+                    control_cols=[1]
                 )
 
                 # 合并相同值的单元格
@@ -126,9 +126,9 @@ class ExcelWriterWithStyle:
                     worksheet,
                     data_cache,
                     start_row=3,
-                    independent_cols=[10],
+                    independent_cols=[],
                     linked_cols=self.merged_func_column,
-                    control_cols=[1, 2, 3, 10]
+                    control_cols=[1, 2, function_start_column]
                 )
 
             print(f"[SUCCESS] Analysis report has been saved to: {output_excel_path}")

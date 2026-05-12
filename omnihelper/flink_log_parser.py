@@ -11,12 +11,13 @@
 import os
 from datetime import datetime
 import urllib.parse
-
 import pandas as pd
 
 from omnihelper.util.common_util import CommonUtil
+from omnihelper.util.log import logger
 from omnihelper.util.flink_excel_util import FlinkExcelWriterWithStyle
-from omnihelper.flink.op_parse import FlinkRequester
+from omnihelper.flink.flink_request import FlinkRequester
+from omnihelper.flink.operator.op_parse import FlinkParser
 
 
 class FlinkLogParser:
@@ -27,6 +28,13 @@ class FlinkLogParser:
         self.args = args  # 存储命令行参数
         self.excel_writer = FlinkExcelWriterWithStyle()  # 用于表格写
         self.analysis_result = []  # 存储最终的分析结果，用于表格写入
+        self.parser = FlinkParser()
+        self.target_metrics = [
+            ".numRecordsIn", ".numRecordsInPerSecond",
+            ".numRecordsOut", ".numRecordsOutPerSecond",
+            ".numBytesIn", ".numBytesInPerSecond",
+            ".numBytesOut", ".numBytesOutPerSecond",
+        ]
         self.args_valid = self._get_arguments()  # 解析命令行并校验参数
         if self.args_valid:
             self.print_arguments()  # 打印初始化页面及参数
@@ -65,7 +73,7 @@ class FlinkLogParser:
         url = self.args.url
         try:
             parsed_url = urllib.parse.urlparse(url)
-            
+
             # 校验协议
             if not parsed_url.scheme:
                 # 如果没有协议，直接报错
@@ -100,7 +108,8 @@ class FlinkLogParser:
         """校验数值参数"""
         # 校验 interval
         if not isinstance(self.args.interval, int) or self.args.interval < 0 or self.args.interval > 30000:
-            print(f"Error: Invalid interval: {self.args.interval}. Interval must be an integer between 0 and 30000 (ms).")
+            print(
+                f"Error: Invalid interval: {self.args.interval}. Interval must be an integer between 0 and 30000 (ms).")
             return False
 
         # 校验 timeout
@@ -167,11 +176,80 @@ class FlinkLogParser:
         print(f"Show Op Details: {self.args.show_op_details}")
         print("-" * 60)
 
+    def fetch_metrics(self, jid, vid, metrics, batch_size=10):
+        results = []
+        for i in range(0, len(metrics), batch_size):
+            batch = metrics[i:i + batch_size]
+            metric_values = self.requester.get_vertex_metrics(jid, vid, batch) if batch else []
+            if metric_values:
+                results.extend(metric_values)
+        return results
+
+    def _get_job_ids(self, jids):
+        if jids is not None:
+            logger.info(f"Using provided job IDS: {jids}")
+            return jids
+        overview = self.requester.get_jobs_overview()
+        if not overview:
+            logger.warning("No jobs overview data received")
+            return []
+        all_jobs = overview.get('jobs', [])
+        return [j['jid'] for j in all_jobs]
+
+    def _process_job(self, jid):
+        detail = self.requester.get_job_detail(jid)
+        if not detail:
+            logger.warning(f"Failed to get detail for job {jid}")
+            return None
+        plan = detail.get("plan", "")
+        if not plan:
+            logger.warning(f"Failed to get plan for job {jid}")
+            return None
+        job_name = detail.get('name', 'Unknown')
+        plan_nodes = {node['id']: node for node in plan.get('nodes', [])}
+        vertices = {
+            vertex["id"]: self._process_vertex(vertex["id"], vertex, plan_nodes, jid, detail)
+            for vertex in detail.get("vertices", [])
+        }
+        return {
+            "job_name": job_name,
+            "vertices": {k: v for k, v in vertices.items() if v is not None}
+        }
+
+    def _process_vertex(self, vid, vertex, plan_nodes, jid, detail):
+        metrics = self._get_vertex_metrics(vid, jid)
+        if not metrics:
+            return None
+        stats = self.parser.parse_performance_stats(vid, metrics["values"],
+                                                    self.parser.get_description(detail, jid))
+        description = plan_nodes.get(vid, {}).get('description', '')
+        op_chain = self.parser.parse_operator_chain(description, stats)
+
+        return {
+            "status": vertex.get('status'),
+            "vertex_name": vertex.get("name"),
+            "operator_chain": op_chain,
+            "logic_metadata": {
+                "full_description": description
+            },
+            "summary_metrics": stats
+        }
+
+    def _get_vertex_metrics(self, vid, jid):
+        available = self.requester.get_vertex_metrics(jid, vid)
+        if not available:
+            logger.warning(f"No metrics available for vertex {vid} in job {jid}")
+            return None
+        needed_ids = self.parser.filter_num_data(available, self.target_metrics)
+        return {
+            "ids": needed_ids,
+            "values": self.fetch_metrics(jid, vid, needed_ids) if needed_ids else []
+        }
+
     def analyze_flink_logs(self):
         """
         实现 Flink 日志分析的核心功能
         """
-        # 检查参数是否有效
         if not self.args_valid:
             print("Error: Invalid arguments. Please check your input and try again.")
             return
@@ -185,31 +263,16 @@ class FlinkLogParser:
             kerberos_mutual_auth=getattr(self.args, 'kerberos_mutual_auth', 'OPTIONAL'),
             headers=getattr(self.args, 'parsed_headers', {}),
         )
-        
-        # 检查是否提供了 jobid
-        if not self.args.jobid:
-            print("No jobid provided, trying to get from API...")
-            print(self.requester.get_jobs_overview())
-        else:
-            print(f"Using provided jobids: {self.args.jobid}")
-            self.analysis_result = []
-            for jobid in self.args.jobid:
-                self.analysis_result.append({
-                    'jobid': jobid,
-                    'taskid': '',
-                    '状态': '',
-                    '算子名称': '',
-                    'Input': '',
-                    'Output': '',
-                    '出现频次': '',
-                    '运行时间(s)': '',
-                    '输入数据量': '',
-                    '输出数据量': '',
-                    '表达式/内置函数名称': '',
-                    '表达式Input': '',
-                    '嵌套内容': '',
-                    '表达式出现频次': ''
-                })
+
+        full_report = {}
+        jobs_ids = self._get_job_ids(self.args.jobid)
+        for jid in jobs_ids:
+            job_data = self._process_job(jid)
+            if job_data:
+                full_report[jid] = job_data
+
+        self.analysis_result = self.parser.parse_job_data(full_report)
+        logger.info(f"Generated report with {len(self.analysis_result)}")
 
     def generate_report(self):
         """
@@ -221,19 +284,19 @@ class FlinkLogParser:
 
         # 定义列顺序，确保与表头配置一致
         columns = [
-            'jobid', 'taskid', '状态', 
+            'jobid', 'taskid', '状态',
             '算子名称', 'Input', 'Output', '出现频次', '运行时间(s)', '输入数据量', '输出数据量',
             '表达式/内置函数名称', 'Input', '嵌套内容', '出现频次'
         ]
-        
+
         # 处理重复列名的情况
         # 为第二个 Input 和 出现频次 列添加临时后缀
         temp_columns = [
-            'jobid', 'taskid', '状态', 
+            'jobid', 'taskid', '状态',
             '算子名称', 'Input', 'Output', '出现频次', '运行时间(s)', '输入数据量', '输出数据量',
             '表达式/内置函数名称', 'Input_2', '嵌套内容', '出现频次_2'
         ]
-        
+
         # 创建一个新的列表，将数据中的 '表达式Input' 和 '表达式出现频次' 映射到临时列名
         processed_data = []
         for item in self.analysis_result:
@@ -254,12 +317,12 @@ class FlinkLogParser:
                 '出现频次_2': item.get('表达式出现频次')
             }
             processed_data.append(processed_item)
-        
+
         # 创建 DataFrame
         df = pd.DataFrame(processed_data, columns=temp_columns)
-        
+
         # 重命名列，将临时后缀去掉，实现重复列名
         df.columns = columns
-        
+
         output_excel_path = os.path.join(self.args.output_dir, f"Omni_Analysis_All_Report_{self.TIMESTAMP}.xlsx")
         self.excel_writer.write_to_excel(df, output_excel_path)

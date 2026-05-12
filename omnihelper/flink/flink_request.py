@@ -9,20 +9,10 @@
    See the Mulan PSL v2 for more details.
 """
 import time
-from json import JSONDecodeError
-
 import requests
-
+from json import JSONDecodeError
 from urllib.parse import urljoin
-import logging
-
-logging.basicConfig(
-    filename="parse_flink.log",
-    level=logging.INFO,
-    format='%(asctime)s [%(levelname)s] %(message)s',
-    datefmt='%Y-%m-%d %H:%M:%S'
-)
-logger = logging.getLogger(__name__)
+from omnihelper.util.log import logger
 
 
 class FlinkRequester:

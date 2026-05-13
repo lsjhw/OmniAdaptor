@@ -32,6 +32,7 @@ public abstract class AbstractValidateOperatorStrategy {
             "TIMESTAMP_WITHOUT_TIME_ZONE(1)",
             "TIMESTAMP_WITHOUT_TIME_ZONE(2)",
             "TIMESTAMP_WITHOUT_TIME_ZONE(3)",
+            "VARCHAR",
             "VARCHAR(2147483647)",
             "VARCHAR(2000)",
             "VARCHAR(9)",
@@ -79,6 +80,11 @@ public abstract class AbstractValidateOperatorStrategy {
                 // match DECIMAL64 and DECIMAL128
                 .flatMap(List::stream)
                 .allMatch(type -> {
+                    if (type.matches("^VARCHAR\\([^)]*\\)$")) {
+                        type = "VARCHAR";
+                        LOG.info("converted to VARCHAR");
+                    }
+
                     if (type.matches("^DECIMAL64\\([^)]*\\)$")) {
                         type = "DECIMAL64";
                         LOG.info("converted to DECIMAL64");

@@ -47,6 +47,14 @@ import org.apache.flink.runtime.state.metainfo.StateMetaInfoSnapshot;
 import org.apache.flink.runtime.state.StreamCompressionDecorator;
 import org.apache.flink.runtime.state.SnappyStreamCompressionDecorator;
 import org.apache.flink.runtime.state.UncompressedStreamCompressionDecorator;
+import org.apache.flink.runtime.state.OperatorStateHandle;
+import org.apache.flink.runtime.state.OperatorStateHandle.Mode;
+import org.apache.flink.runtime.state.OperatorStateHandle.StateMetaInfo;
+import org.apache.flink.runtime.state.OperatorStreamStateHandle;
+import org.apache.flink.runtime.state.OperatorBackendSerializationProxy;
+import org.apache.flink.runtime.state.PartitionableListState;
+import org.apache.flink.runtime.state.BackendWritableBroadcastState;
+import org.apache.flink.runtime.state.OperatorStateRestoreOperation;
 import org.apache.flink.runtime.taskmanager.RuntimeEnvironment;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.type.TypeReference;
@@ -287,6 +295,32 @@ public class OmniTaskWrapper {
         }
     }
 
+    public SnapshotResult<StreamStateHandle> materializeOperatorMetaData(long checkpointId,
+                                                                         String checkpointOptionStr,
+                                                                         String operatorStateMetaInfoSnapshotsJson,
+                                                                         String broadcastStateMetaInfoSnapshotsJson) throws IOException {
+        try {
+            List<Map<String, Object>> operatorStateMetaInfoMapList = JsonHelper.fromJson(operatorStateMetaInfoSnapshotsJson, new TypeReference<List<Map<String, Object>>>() {
+            });
+            List<Map<String, Object>> broadcastStateMetaInfoMapList = JsonHelper.fromJson(broadcastStateMetaInfoSnapshotsJson, new TypeReference<List<Map<String, Object>>>() {
+            });
+
+            List<StateMetaInfoSnapshot> operatorStateMetaInfoSnapshotList = OmniStateSerializerUtils.buildStateMetaInfoSnapshot(omniTask, operatorStateMetaInfoMapList);
+            List<StateMetaInfoSnapshot> broadcastStateMetaInfoSnapshotList = OmniStateSerializerUtils.buildStateMetaInfoSnapshot(omniTask, broadcastStateMetaInfoMapList);
+
+            LOG.info("method : materializeOperatorMetaData -> operatorStateMetaInfoSnapshotList : {}", JsonHelper.toJson(operatorStateMetaInfoSnapshotList));
+            LOG.info("method : materializeOperatorMetaData -> broadcastStateMetaInfoSnapshotList : {}", JsonHelper.toJson(broadcastStateMetaInfoSnapshotList));
+
+            return omniTask.materializeOperatorMetaData(checkpointId,
+                    parseCheckpointOptions(checkpointOptionStr),
+                    operatorStateMetaInfoSnapshotList,
+                    broadcastStateMetaInfoSnapshotList);
+        } catch (Exception e) {
+            LOG.error("method : materializeOperatorMetaData -> exception", e);
+            throw new IOException("Failed to materialize operator metadata", e);
+        }
+    }
+
     public CheckpointStreamWithResultProvider acquireSavepointOutputStream(long checkpointId, String checkpointOptionStr) throws Exception {
         return omniTask.acquireSavepointOutputStream(checkpointId, parseCheckpointOptions(checkpointOptionStr));
     }
@@ -296,6 +330,7 @@ public class OmniTaskWrapper {
     }
 
     public void writeSavepointOutputStream(CheckpointStreamWithResultProvider provider, byte[] chunk) throws Exception {
+        // LOG.info("method : writeSavepointOutputStream chunk" + JsonHelper.toJson(chunk));
         omniTask.writeSavepointOutputStream(provider, chunk);
     }
 
@@ -561,6 +596,41 @@ public class OmniTaskWrapper {
         }
     }
 
+    private OperatorStreamStateHandle deserializeOperatorStreamStateHandle(String metaStateHandleStr) {
+        try {
+            JsonNode rootNode = OBJECT_MAPPER.readTree(metaStateHandleStr);
+            
+            StreamStateHandle metaDataState = TaskStateSnapshotDeser.parseStreamStateHandle(rootNode.get("metaDataState"));
+            JsonNode partitionOffsetsNode = rootNode.get("stateNameToPartitionOffsets");
+            
+            Map<String, StateMetaInfo> stateMap = new HashMap<>();
+            
+            Iterator<String> fieldNames = partitionOffsetsNode.fieldNames();
+            while (fieldNames.hasNext()) {
+                String stateName = fieldNames.next();
+                JsonNode stateNode = partitionOffsetsNode.get(stateName);
+                JsonNode offsetsNode = stateNode.get("offsets");
+                if (offsetsNode != null && offsetsNode.isArray()) {
+                    int size = offsetsNode.size();
+                    long[] offsets = new long[size];
+                    for (int i = 0; i < size; i++) {
+                        JsonNode offsetNode = offsetsNode.get(i);
+                        if (offsetNode.isNumber()) {
+                            offsets[i] = offsetNode.asLong();
+                        }
+                    }
+                    StateMetaInfo metaInfo = new StateMetaInfo(offsets, Mode.valueOf(stateNode.get("distributionMode").asText()));
+                    stateMap.put(stateName, metaInfo);
+                }
+            }
+            return new OperatorStreamStateHandle(stateMap, metaDataState);
+        } catch (Exception e) {
+            throw new JsonHelper.JsonHelperException(
+                    "Error deserializing metaStateHandleStr to OperatorStreamStateHandle: "
+                            + metaStateHandleStr, e);
+        }
+    }
+
     // This function is for C++ calling readMetaData in RocksDBIncrementalRestoreOperation
     public <K> String readMetaData(String metaStateHandleStr) throws IOException {
         // Reconstruct a IncrementalLocalStateHandle
@@ -608,6 +678,57 @@ public class OmniTaskWrapper {
             // Convert to a string and return to C++
             return JsonHelper.toJson(stateMetaInfoSnapshotList);
         } finally {
+            if (cancelStreamRegistry.unregisterCloseable(inputStream)) {
+                inputStream.close();
+            }
+        }
+    }
+
+    public <K> String readOperatorMetaData(String metaStateHandleStr) throws IOException {
+        // Reconstruct a IncrementalLocalStateHandle
+        StreamStateHandle metaStateHandle = null;
+        JsonNode rootNode = OBJECT_MAPPER.readTree(metaStateHandleStr);
+        String classType = rootNode.get("@class").asText();
+        if ("org.apache.flink.runtime.state.OperatorStreamStateHandle".equals(classType)) {
+            OperatorStreamStateHandle operatorStateHandle = deserializeOperatorStreamStateHandle(metaStateHandleStr);
+            metaStateHandle = operatorStateHandle.getDelegateStateHandle();
+        } else {
+            throw new IOException("Unsupported metaStateHandleStr json.");
+        }
+
+        RuntimeEnvironment env = omniTask.getCheckpointingEnv();
+        ClassLoader userCodeClassLoader = env.getUserCodeClassLoader().asClassLoader();
+        InputStream inputStream = null;
+        CloseableRegistry cancelStreamRegistry = new CloseableRegistry();
+        ClassLoader restoreClassLoader = Thread.currentThread().getContextClassLoader();
+
+        try {
+            // The readMetaData function
+            inputStream = metaStateHandle.openInputStream();
+            cancelStreamRegistry.registerCloseable(inputStream);
+
+            Thread.currentThread().setContextClassLoader(userCodeClassLoader);
+            OperatorBackendSerializationProxy backendSerializationProxy =
+                new OperatorBackendSerializationProxy(userCodeClassLoader);
+            backendSerializationProxy.read(new DataInputViewStreamWrapper(inputStream));
+
+            List<StateMetaInfoSnapshot> stateMetaInfoSnapshots =
+                backendSerializationProxy.getOperatorStateMetaInfoSnapshots();
+
+            List<StateMetaInfoSnapshot> broadcastStateMetaInfoSnapshots =
+                backendSerializationProxy.getBroadcastStateMetaInfoSnapshots();
+
+            List<Map<String, Object>> stateMetaInfoSnapshotList = new ArrayList<>(stateMetaInfoSnapshots.size());
+            for (StateMetaInfoSnapshot metaInfo : stateMetaInfoSnapshots) {
+                stateMetaInfoSnapshotList.add(OmniStateSerializerHelper.buildSerializerJsonInfo(metaInfo));
+            }
+
+            LOG.debug("method : readMetaData -> stateMetaInfoSnapshotList : {}", JsonHelper.toJson(stateMetaInfoSnapshotList));
+
+            // Convert to a string and return to C++
+            return JsonHelper.toJson(stateMetaInfoSnapshotList);
+        } finally {
+            Thread.currentThread().setContextClassLoader(restoreClassLoader);
             if (cancelStreamRegistry.unregisterCloseable(inputStream)) {
                 inputStream.close();
             }

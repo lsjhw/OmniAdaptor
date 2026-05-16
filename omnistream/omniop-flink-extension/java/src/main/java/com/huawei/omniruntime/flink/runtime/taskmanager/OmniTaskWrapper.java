@@ -6,8 +6,8 @@ package com.huawei.omniruntime.flink.runtime.taskmanager;
 
 import com.huawei.omniruntime.flink.runtime.api.graph.json.JsonHelper;
 import com.huawei.omniruntime.flink.runtime.api.graph.json.TaskStateSnapshotDeser;
-import com.huawei.omniruntime.flink.runtime.api.state.serializer.consts.SC;
 import com.huawei.omniruntime.flink.runtime.api.state.serializer.consts.enums.OmniSerializerKeyedStateType;
+import com.huawei.omniruntime.flink.runtime.api.state.serializer.utils.OmniStateSerializerUtils;
 import com.huawei.omniruntime.flink.runtime.restore.KeyGroupEntry;
 import com.huawei.omniruntime.flink.runtime.restore.KeyGroupEntryWrapper;
 
@@ -63,6 +63,7 @@ import java.util.Arrays;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Iterator;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -203,12 +204,12 @@ public class OmniTaskWrapper {
                                                                  String localRecoveryConfigStr,
                                                                  String checkpointOptionStr) throws IOException {
         try {
+            LOG.debug("method : materializeMetaData -> stateMetaInfoSnapshotsJson : {}", stateMetaInfoSnapshotsJson);
+
             List<Map<String, Object>> stateMetaInfoMaps =
                     OBJECT_MAPPER.readValue(stateMetaInfoSnapshotsJson, new TypeReference<List<Map<String, Object>>>() {
                     });
 
-            // build key
-            String taskKey = SC.HYPHEN;
             LocalRecoveryConfig recoveryConfig = null;
             if (!"{}".equals(localRecoveryConfigStr)) {
                 Map<String, Object> configMap = OBJECT_MAPPER.readValue(localRecoveryConfigStr, new TypeReference<Map<String, Object>>() {
@@ -250,18 +251,13 @@ public class OmniTaskWrapper {
 
                 if (null == keySerializer) {
                     // build
-                    keySerializer = OmniStateSerializerHelper.getStateBackendKeySerializer(
-                            taskKey,
-                            metaInfo,
-                            executionConfig,
-                            userCodeClassLoader);
+                    keySerializer = OmniStateSerializerHelper.getStateBackendKeySerializer(metaInfo, executionConfig, userCodeClassLoader);
                     LOG.debug("method : materializeMetaData -> keySerializer : {}", keySerializer);
                 }
 
                 Map<String, String> serializer = JsonHelper.fromJson(metaInfo.get("serializer").toString(), HashMap.class);
                 // deal
                 OmniStateMetaSerializerInfo.Builder builder = OmniStateSerializerHelper.buildSerializerInfo(
-                        taskKey,
                         name,
                         typeCode,
                         serializer,
@@ -282,7 +278,7 @@ public class OmniTaskWrapper {
                         null == serializerInfo ? Collections.emptyMap() : serializerInfo.getSerializerSnapshotGroup(),
                         null == serializerInfo ? Collections.emptyMap() : serializerInfo.getSerializerGroup()));
             }
-            LOG.debug("method : materializeMetaData -> taskKey : {}, stateMetaInfoSnapshots : {}", taskKey, stateMetaInfoSnapshots);
+            LOG.debug("method : materializeMetaData -> stateMetaInfoSnapshots : {}", stateMetaInfoSnapshots);
 
             return omniTask.materializeMetaData(checkpointId, stateMetaInfoSnapshots, recoveryConfig, parseCheckpointOptions(checkpointOptionStr), keySerializer);
         } catch (Exception e) {
@@ -309,8 +305,6 @@ public class OmniTaskWrapper {
                     OBJECT_MAPPER.readValue(stateMetaInfoSnapshotsJson, new TypeReference<List<Map<String, Object>>>() {
                     });
 
-            // build key
-            String taskKey = SC.HYPHEN;
             ExecutionConfig executionConfig = omniTask.getExecutionConfig();
             ClassLoader userCodeClassLoader = omniTask.getCheckpointingEnv()
                     .getUserCodeClassLoader().asClassLoader();
@@ -331,11 +325,7 @@ public class OmniTaskWrapper {
 
                 if(null == keySerializer){
                     // build
-                    keySerializer = OmniStateSerializerHelper.getStateBackendKeySerializer(
-                            taskKey,
-                            metaInfo,
-                            executionConfig,
-                            userCodeClassLoader);
+                    keySerializer = OmniStateSerializerHelper.getStateBackendKeySerializer(metaInfo, executionConfig, userCodeClassLoader);
                     LOG.debug("method : writeSavepointMetadata -> keySerializer : {}", keySerializer);
                 }
 
@@ -343,7 +333,6 @@ public class OmniTaskWrapper {
 
                 // deal
                 OmniStateMetaSerializerInfo.Builder builder = OmniStateSerializerHelper.buildSerializerInfo(
-                        taskKey,
                         name,
                         typeCode,
                         serializer,
@@ -364,12 +353,38 @@ public class OmniTaskWrapper {
                         null == serializerInfo ? Collections.emptyMap() : serializerInfo.getSerializerSnapshotGroup(),
                         null == serializerInfo ? Collections.emptyMap() : serializerInfo.getSerializerGroup()));
             }
-            LOG.debug("method : writeSavepointMetadata -> taskKey : {}, stateMetaInfoSnapshots : {}", taskKey, stateMetaInfoSnapshots);
+            LOG.debug("method : writeSavepointMetadata -> stateMetaInfoSnapshots : {}", stateMetaInfoSnapshots);
 
             omniTask.writeSavepointMetadata(provider, stateMetaInfoSnapshots, keySerializer);
         } catch (Exception e) {
             LOG.error("method : writeSavepointMetadata -> exception", e);
             throw new IOException("Failed to writeSavepoint metadata", e);
+        }
+    }
+
+    public void writeOperatorMetaData(CheckpointStreamWithResultProvider provider,
+                                      String operatorStateMetaInfoSnapshotsJson,
+                                      String broadcastStateMetaInfoSnapshotsJson) throws IOException {
+        try {
+
+            LOG.info("method : writeOperatorMetaData -> start");
+            List<Map<String, Object>> operatorStateMetaInfoMapList = JsonHelper.fromJson(operatorStateMetaInfoSnapshotsJson, new TypeReference<List<Map<String, Object>>>() {
+            });
+            List<Map<String, Object>> broadcastStateMetaInfoMapList = JsonHelper.fromJson(broadcastStateMetaInfoSnapshotsJson, new TypeReference<List<Map<String, Object>>>() {
+            });
+
+            List<StateMetaInfoSnapshot> operatorStateMetaInfoSnapshotList = OmniStateSerializerUtils.buildStateMetaInfoSnapshot(omniTask, operatorStateMetaInfoMapList);
+            List<StateMetaInfoSnapshot> broadcastStateMetaInfoSnapshotList = OmniStateSerializerUtils.buildStateMetaInfoSnapshot(omniTask, broadcastStateMetaInfoMapList);
+
+            LOG.info("method : writeOperatorMetaData -> operatorStateMetaInfoSnapshotList : {}", JsonHelper.toJson(operatorStateMetaInfoSnapshotList));
+            LOG.info("method : writeOperatorMetaData -> broadcastStateMetaInfoSnapshotList : {}", JsonHelper.toJson(broadcastStateMetaInfoSnapshotList));
+
+            omniTask.writeOperatorMetaData(provider,
+                    operatorStateMetaInfoSnapshotList,
+                    broadcastStateMetaInfoSnapshotList);
+        } catch (Exception e) {
+            LOG.error("method : writeOperatorMetaData -> exception", e);
+            throw new IOException("Failed to materialize operator metadata", e);
         }
     }
 

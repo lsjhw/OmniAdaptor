@@ -50,6 +50,8 @@ import org.apache.flink.runtime.checkpoint.CheckpointException;
 import org.apache.flink.runtime.checkpoint.CheckpointFailureReason;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
 import org.apache.flink.runtime.checkpoint.CheckpointStoreUtil;
+import org.apache.flink.runtime.checkpoint.SavepointType;
+import org.apache.flink.runtime.checkpoint.SnapshotType;
 import org.apache.flink.runtime.checkpoint.channel.ChannelStateWriter;
 import org.apache.flink.runtime.clusterframework.types.AllocationID;
 import org.apache.flink.runtime.deployment.InputGateDeploymentDescriptor;
@@ -103,13 +105,14 @@ import org.apache.flink.runtime.state.CheckpointStreamFactory;
 import org.apache.flink.runtime.state.CheckpointStreamWithResultProvider;
 import org.apache.flink.runtime.state.CheckpointStorageAccess;
 import org.apache.flink.runtime.state.CheckpointedStateScope;
-import org.apache.flink.runtime.state.IncrementalKeyedStateHandle.HandleAndLocalPath;
+import org.apache.flink.runtime.state.OperatorBackendSerializationProxy;
 import org.apache.flink.runtime.state.KeyedBackendSerializationProxy;
 import org.apache.flink.runtime.state.StateUtil;
 import org.apache.flink.runtime.state.LocalRecoveryConfig;
 import org.apache.flink.runtime.state.StreamStateHandle;
 import org.apache.flink.runtime.state.SnapshotResult;
 import org.apache.flink.runtime.state.TaskStateManager;
+import org.apache.flink.runtime.state.IncrementalKeyedStateHandle.HandleAndLocalPath;
 import org.apache.flink.runtime.state.metainfo.StateMetaInfoSnapshot;
 import org.apache.flink.runtime.taskexecutor.GlobalAggregateManager;
 import org.apache.flink.runtime.taskexecutor.KvStateService;
@@ -1297,7 +1300,12 @@ public class OmniTask extends Task {
     }
 
     public void writeSavepointOutputStream(CheckpointStreamWithResultProvider provider, byte[] chunk) throws Exception {
-        provider.getCheckpointOutputStream().write(chunk);
+        try {
+            provider.getCheckpointOutputStream().write(chunk);
+        } catch (Exception e) {
+            LOG.error("method : writeSavepointOutputStream -> exception", e);
+            throw new IOException("Failed to writeSavepointOutputStream kk", e);
+        }
     }
 
     public void writeSavepointMetadata(
@@ -1314,6 +1322,20 @@ public class OmniTask extends Task {
         final DataOutputView out =
                 new DataOutputViewStreamWrapper(provider.getCheckpointOutputStream());
         serializationProxy.write(out);
+    }
+
+    public void writeOperatorMetaData(
+            CheckpointStreamWithResultProvider provider,
+            List<StateMetaInfoSnapshot> operatorStateMetaInfoSnapshotList,
+            List<StateMetaInfoSnapshot> broadcastStateMetaInfoSnapshotList) throws Exception {
+
+        final DataOutputView out = new DataOutputViewStreamWrapper(provider.getCheckpointOutputStream());
+
+        OperatorBackendSerializationProxy backendSerializationProxy =
+                new OperatorBackendSerializationProxy(
+                        operatorStateMetaInfoSnapshotList, broadcastStateMetaInfoSnapshotList);
+
+        backendSerializationProxy.write(out);
     }
 
     public long getSavepointOutputStreamPos(CheckpointStreamWithResultProvider provider) throws Exception {

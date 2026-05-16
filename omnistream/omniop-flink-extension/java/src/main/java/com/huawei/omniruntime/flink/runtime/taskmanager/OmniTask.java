@@ -206,6 +206,12 @@ public class OmniTask extends Task {
     private CheckpointOptions checkpointOptions;
     private CheckpointStreamFactory checkpointStreamFactory;
 
+    /**
+     * Checkpoint ID of the synchronous savepoint (stop-with-savepoint) that should trigger
+     * native task termination once the checkpoint is globally completed.
+     */
+    private Long syncSavepointId = null;
+
     // temporarily use public for easy access from OmniTaskWrapper
     public RuntimeEnvironment checkpointingEnv;
 
@@ -853,14 +859,59 @@ public class OmniTask extends Task {
             long checkpointId,
             long latestCompletedCheckpointId,
             NotifyCheckpointOperation notifyCheckpointOperation) {
-        long ordinal = notifyCheckpointOperation.ordinal();
         if (NotifyCheckpointOperation.ABORT == notifyCheckpointOperation) {
             abortCpp(nativeTaskRef, checkpointId, latestCompletedCheckpointId);
+            if (syncSavepointId != null && syncSavepointId == checkpointId) {
+                LOG.debug("Synchronous savepoint {} aborted, clearing stop flag.", checkpointId);
+                syncSavepointId = null;
+            }
         } else if (NotifyCheckpointOperation.COMPLETE == notifyCheckpointOperation) {
             long inputState = convertExecutionState(executionState);
             completeCpp(nativeTaskRef, checkpointId, inputState);
+            if (syncSavepointId != null && syncSavepointId == checkpointId) {
+                LOG.debug(
+                        "Stop-with-savepoint checkpoint {} completed for task {} (state={}), "
+                                + "signalling native task to terminate.",
+                        checkpointId,
+                        taskNameWithSubtask,
+                        executionState);
+                cancelTask(nativeTaskRef);
+                syncSavepointId = null;
+            } else {
+                LOG.debug(
+                        "Checkpoint {} completed for task {} (state={}, syncSavepointId={}).",
+                        checkpointId,
+                        taskNameWithSubtask,
+                        executionState,
+                        syncSavepointId);
+            }
         } else if (NotifyCheckpointOperation.SUBSUME == notifyCheckpointOperation) {
+            LOG.debug(
+                    "checkpoint {} subsumedCpp.",
+                    checkpointId);
             subsumedCpp(nativeTaskRef, latestCompletedCheckpointId);
+        }
+
+        switch (notifyCheckpointOperation) {
+            case ABORT:
+                    LOG.debug(
+                        "checkpoint {} notifyCheckpointAborted.",
+
+                        checkpointId);
+                super.notifyCheckpointAborted(checkpointId, latestCompletedCheckpointId);
+                break;
+            case COMPLETE:
+                    LOG.debug(
+                        "checkpoint {} notifyCheckpointComplete.",
+                        checkpointId);
+                super.notifyCheckpointComplete(checkpointId);
+                break;
+            case SUBSUME:
+                    LOG.debug(
+                        "checkpoint {} notifyCheckpointSubsumed.",
+                        checkpointId);
+                super.notifyCheckpointSubsumed(checkpointId);
+                break;
         }
     }
 
@@ -1019,6 +1070,24 @@ public class OmniTask extends Task {
         this.checkpointOptions = checkpointOptions;
         String checkpointOptionsString=JsonHelper.toJson(checkpointOptions);
         triggerCheckpointCpp(nativeTaskRef,checkpointID,checkpointTimestamp,checkpointOptionsString);
+
+        SnapshotType snapshotType = checkpointOptions.getCheckpointType();
+        if (snapshotType.isSavepoint() && ((SavepointType) snapshotType).isSynchronous()) {
+            this.syncSavepointId = checkpointID;
+            LOG.debug(
+                    "Synchronous savepoint {} triggered for task {} (state={}), "
+                            + "task will stop after checkpoint completion.",
+                    checkpointID,
+                    taskNameWithSubtask,
+                    executionState);
+        } else {
+            LOG.debug(
+                    "Checkpoint {} triggered for task {} (state={}, type={}).",
+                    checkpointID,
+                    taskNameWithSubtask,
+                    executionState,
+                    snapshotType);
+        }
     }
 
     public RuntimeEnvironment getCheckpointingEnv() {

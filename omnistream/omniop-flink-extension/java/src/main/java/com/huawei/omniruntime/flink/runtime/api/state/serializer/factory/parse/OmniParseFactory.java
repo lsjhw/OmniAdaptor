@@ -280,7 +280,6 @@ public abstract class OmniParseFactory {
                 }
 
                 String jsonString = stringWriter.toString();
-                LOG.info("method : buildJsonInfoBy -> jsonString : {}", jsonString);
                 JsonNode logicType = JsonHelper.fromJson(jsonString, JsonNode.class);
                 jsonInfo.setLogicalType(logicType);
                 return jsonInfo;

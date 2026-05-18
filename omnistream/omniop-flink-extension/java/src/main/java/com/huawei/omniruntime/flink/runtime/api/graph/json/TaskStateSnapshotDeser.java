@@ -310,7 +310,6 @@ public class TaskStateSnapshotDeser {
 
     private static void parseManagedOperatorStateArray(JsonNode managedOperatorStateArray,
                                                     StateObjectCollection<OperatorStateHandle> managedOperatorState) {
-           LOG.error("savepoint: parseManagedOperatorStateArray: {}", JsonHelper.toJson(managedOperatorStateArray));
            for (JsonNode handleNode : managedOperatorStateArray) {
                String handleType = handleNode.get("stateHandleName").asText();
                if ("OperatorStreamStateHandle".equals(handleType)) {
@@ -335,7 +334,6 @@ public class TaskStateSnapshotDeser {
                    managedOperatorState.add(operatorStreamStateHandle);
                }
            }
-           LOG.error("savepoint: parseManagedOperatorStateArray managedOperatorState: {}", JsonHelper.toJson(managedOperatorState));
     }
 
     private static void parseManagedKeyedStateArray(JsonNode managedKeyedStateArray,

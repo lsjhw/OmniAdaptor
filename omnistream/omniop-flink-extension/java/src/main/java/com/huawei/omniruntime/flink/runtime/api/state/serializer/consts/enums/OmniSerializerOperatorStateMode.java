@@ -4,8 +4,8 @@ import org.apache.flink.runtime.state.OperatorStateHandle;
 
 public enum OmniSerializerOperatorStateMode {
     SPLIT_DISTRIBUTE("0", OperatorStateHandle.Mode.SPLIT_DISTRIBUTE),
-    UNION("0", OperatorStateHandle.Mode.UNION),
-    BROADCAST("0", OperatorStateHandle.Mode.BROADCAST),
+    UNION("1", OperatorStateHandle.Mode.UNION),
+    BROADCAST("2", OperatorStateHandle.Mode.BROADCAST),
     ;
 
     private final String code;

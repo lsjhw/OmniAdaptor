@@ -295,32 +295,6 @@ public class OmniTaskWrapper {
         }
     }
 
-    public SnapshotResult<StreamStateHandle> materializeOperatorMetaData(long checkpointId,
-                                                                         String checkpointOptionStr,
-                                                                         String operatorStateMetaInfoSnapshotsJson,
-                                                                         String broadcastStateMetaInfoSnapshotsJson) throws IOException {
-        try {
-            List<Map<String, Object>> operatorStateMetaInfoMapList = JsonHelper.fromJson(operatorStateMetaInfoSnapshotsJson, new TypeReference<List<Map<String, Object>>>() {
-            });
-            List<Map<String, Object>> broadcastStateMetaInfoMapList = JsonHelper.fromJson(broadcastStateMetaInfoSnapshotsJson, new TypeReference<List<Map<String, Object>>>() {
-            });
-
-            List<StateMetaInfoSnapshot> operatorStateMetaInfoSnapshotList = OmniStateSerializerUtils.buildStateMetaInfoSnapshot(omniTask, operatorStateMetaInfoMapList);
-            List<StateMetaInfoSnapshot> broadcastStateMetaInfoSnapshotList = OmniStateSerializerUtils.buildStateMetaInfoSnapshot(omniTask, broadcastStateMetaInfoMapList);
-
-            LOG.info("method : materializeOperatorMetaData -> operatorStateMetaInfoSnapshotList : {}", JsonHelper.toJson(operatorStateMetaInfoSnapshotList));
-            LOG.info("method : materializeOperatorMetaData -> broadcastStateMetaInfoSnapshotList : {}", JsonHelper.toJson(broadcastStateMetaInfoSnapshotList));
-
-            return omniTask.materializeOperatorMetaData(checkpointId,
-                    parseCheckpointOptions(checkpointOptionStr),
-                    operatorStateMetaInfoSnapshotList,
-                    broadcastStateMetaInfoSnapshotList);
-        } catch (Exception e) {
-            LOG.error("method : materializeOperatorMetaData -> exception", e);
-            throw new IOException("Failed to materialize operator metadata", e);
-        }
-    }
-
     public CheckpointStreamWithResultProvider acquireSavepointOutputStream(long checkpointId, String checkpointOptionStr) throws Exception {
         return omniTask.acquireSavepointOutputStream(checkpointId, parseCheckpointOptions(checkpointOptionStr));
     }
@@ -330,7 +304,6 @@ public class OmniTaskWrapper {
     }
 
     public void writeSavepointOutputStream(CheckpointStreamWithResultProvider provider, byte[] chunk) throws Exception {
-        // LOG.info("method : writeSavepointOutputStream chunk" + JsonHelper.toJson(chunk));
         omniTask.writeSavepointOutputStream(provider, chunk);
     }
 
@@ -401,8 +374,6 @@ public class OmniTaskWrapper {
                                       String operatorStateMetaInfoSnapshotsJson,
                                       String broadcastStateMetaInfoSnapshotsJson) throws IOException {
         try {
-
-            LOG.info("method : writeOperatorMetaData -> start");
             List<Map<String, Object>> operatorStateMetaInfoMapList = JsonHelper.fromJson(operatorStateMetaInfoSnapshotsJson, new TypeReference<List<Map<String, Object>>>() {
             });
             List<Map<String, Object>> broadcastStateMetaInfoMapList = JsonHelper.fromJson(broadcastStateMetaInfoSnapshotsJson, new TypeReference<List<Map<String, Object>>>() {
@@ -411,8 +382,8 @@ public class OmniTaskWrapper {
             List<StateMetaInfoSnapshot> operatorStateMetaInfoSnapshotList = OmniStateSerializerUtils.buildStateMetaInfoSnapshot(omniTask, operatorStateMetaInfoMapList);
             List<StateMetaInfoSnapshot> broadcastStateMetaInfoSnapshotList = OmniStateSerializerUtils.buildStateMetaInfoSnapshot(omniTask, broadcastStateMetaInfoMapList);
 
-            LOG.info("method : writeOperatorMetaData -> operatorStateMetaInfoSnapshotList : {}", JsonHelper.toJson(operatorStateMetaInfoSnapshotList));
-            LOG.info("method : writeOperatorMetaData -> broadcastStateMetaInfoSnapshotList : {}", JsonHelper.toJson(broadcastStateMetaInfoSnapshotList));
+            LOG.debug("method : writeOperatorMetaData -> operatorStateMetaInfoSnapshotList : {}", JsonHelper.toJson(operatorStateMetaInfoSnapshotList));
+            LOG.debug("method : writeOperatorMetaData -> broadcastStateMetaInfoSnapshotList : {}", JsonHelper.toJson(broadcastStateMetaInfoSnapshotList));
 
             omniTask.writeOperatorMetaData(provider,
                     operatorStateMetaInfoSnapshotList,
@@ -723,7 +694,7 @@ public class OmniTaskWrapper {
                 stateMetaInfoSnapshotList.add(OmniStateSerializerHelper.buildSerializerJsonInfo(metaInfo));
             }
 
-            LOG.debug("method : readMetaData -> stateMetaInfoSnapshotList : {}", JsonHelper.toJson(stateMetaInfoSnapshotList));
+            LOG.debug("method : readOperatorMetaData -> stateMetaInfoSnapshotList : {}", JsonHelper.toJson(stateMetaInfoSnapshotList));
 
             // Convert to a string and return to C++
             return JsonHelper.toJson(stateMetaInfoSnapshotList);

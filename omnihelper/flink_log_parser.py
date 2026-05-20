@@ -9,6 +9,7 @@
    See the Mulan PSL v2 for more details.
 """
 import os
+import re
 from datetime import datetime
 import urllib.parse
 import pandas as pd
@@ -18,6 +19,7 @@ from omnihelper.util.log import logger
 from omnihelper.util.flink_excel_util import FlinkExcelWriterWithStyle
 from omnihelper.flink.flink_request import FlinkRequester
 from omnihelper.flink.operator.op_parse import FlinkParser
+from omnihelper.flink.schema.table_schema_reader import TableSchemaReader
 from omnihelper.constants.flink_constants import TaskStatus, ExcelColumns, MetricType
 
 
@@ -32,9 +34,37 @@ class FlinkLogParser:
         self.analysis_result = []  # 存储最终的分析结果，用于表格写入
         self.parser = FlinkParser()
         self.target_metrics = MetricType.get_target_metrics()
-        self.args_valid = self._get_arguments()  # 解析命令行并校验参数
+        self.table_schema = {}
+        self.column_type = {}
+        self.table_column_type = {}
+        self.args_valid = self._get_arguments()
         if self.args_valid:
-            self.print_arguments()  # 打印初始化页面及参数
+            self._load_table_schema()
+            self.print_arguments()
+
+    def _load_table_schema(self):
+        csv_path = getattr(self.args, 'input_data', None)
+        if not csv_path:
+            default_path = os.path.join(self.EXECUTE_PATH, "resources", "flink_table_schema.csv")
+            if os.path.exists(default_path):
+                csv_path = default_path
+                logger.info(f"Using default table schema CSV: {default_path}")
+            else:
+                logger.info("No table schema CSV provided and default not found, type resolution will be limited")
+                return
+
+        if not os.path.exists(csv_path):
+            logger.warning(f"Table schema CSV file not found: {csv_path}")
+            return
+
+        self.table_schema = TableSchemaReader.read_table_schema(csv_path)
+        if self.table_schema:
+            self.column_type, self.table_column_type = TableSchemaReader.build_column_type_mapping(
+                self.table_schema
+            )
+            self.parser.set_table_schema(self.table_schema, self.column_type, self.table_column_type)
+            logger.info(f"Loaded table schema: {len(self.table_schema)} tables, "
+                        f"{len(self.column_type)} column types")
 
     def _get_arguments(self):
         # 输出目录默认值
@@ -171,7 +201,9 @@ class FlinkLogParser:
             print(f"Kerberos Mutual Auth: {getattr(self.args, 'kerberos_mutual_auth', 'OPTIONAL')}")
         print(f"Output Directory: {os.path.realpath(self.args.output_dir)}")
         print(f"Show Op Details: {self.args.show_op_details}")
-        print(f"DDD CSV Path: {getattr(self.args, 'input_data', 'Not provided')}")
+        print(f"Table Schema CSV: {getattr(self.args, 'input_data', 'Not provided')}")
+        if self.table_schema:
+            print(f"Tables Loaded: {len(self.table_schema)}")
         print("-" * 60)
 
     def fetch_metrics(self, jid, vid, metrics, batch_size=10):
@@ -225,6 +257,15 @@ class FlinkLogParser:
                                               "", {"operators": {}, "summary": {}, "analysis": {}})
 
         description = self._get_description(vid, plan_nodes)
+        description_data = self._parse_description_data(description)
+        plan_node = plan_nodes.get(vid, {})
+        raw_inputs = plan_node.get("inputs", [])
+        upstream_ids = []
+        for inp in raw_inputs:
+            if isinstance(inp, dict):
+                upstream_ids.append(inp.get("id", ""))
+            elif isinstance(inp, str):
+                upstream_ids.append(inp)
 
         try:
             stats = self._parse_performance_stats(vid, metrics["values"], detail, jid)
@@ -234,23 +275,31 @@ class FlinkLogParser:
             stats = {"operators": {}, "summary": {}, "analysis": {}}
             status = TaskStatus.OPERATOR_PARSE_FAILED
 
-        return self._create_vertex_result(vid, jid, vertex, status, description, stats)
+        return self._create_vertex_result(vid, jid, vertex, status, description, stats, description_data, upstream_ids)
 
     def _get_description(self, vid, plan_nodes):
         """获取节点描述信息"""
         return plan_nodes.get(vid, {}).get('description', '')
+
+    def _parse_description_data(self, description):
+        if not description:
+            return []
+        raw_parts = re.split(r"<br/>|\n", description)
+        return [
+            parsed_line for line in raw_parts
+            if (parsed_line := FlinkParser.parse_single_description_line(line)) is not None
+        ]
 
     def _parse_performance_stats(self, vid, metrics_values, detail, jid):
         """解析性能统计数据"""
         return self.parser.parse_performance_stats(vid, metrics_values,
                                                    self.parser.get_description(detail, jid))
 
-    def _create_vertex_result(self, vid, jid, vertex, status, description, stats):
-        """创建 vertex 处理结果"""
+    def _create_vertex_result(self, vid, jid, vertex, status, description, stats, description_data=None, upstream_ids=None):
         if status != TaskStatus.SUCCESS:
             logger.warning(f"Vertex {vid} in job {jid} status: {status}")
 
-        return {
+        result = {
             "status": status,
             "vertex_name": vertex.get("name"),
             "logic_metadata": {
@@ -258,6 +307,14 @@ class FlinkLogParser:
             },
             "summary_metrics": stats
         }
+
+        if description_data is not None:
+            result["description_data"] = description_data
+
+        if upstream_ids is not None:
+            result["upstream_ids"] = upstream_ids
+
+        return result
 
     def _get_vertex_metrics(self, vid, jid):
         available = self.requester.get_vertex_metrics(jid, vid)

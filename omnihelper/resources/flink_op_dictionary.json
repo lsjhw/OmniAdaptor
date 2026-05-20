@@ -1,90 +1,338 @@
 {
   "Calc": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "indices",
+      "input_source": "select",
+      "input_field": "indices",
+      "output_source": "select",
+      "output_field": "indices",
+      "text_input_pattern": "select=\\[(.*?)\\]",
+      "text_output_pattern": "select=\\[(.*?)\\]"
+    }
   },
   "GroupAggregate": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "aggInfoList",
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": "groupBy=\\[(.*?)\\]"
+    }
   },
   "LocalGroupAggregate": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "aggInfoList",
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "GlobalGroupAggregate": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "aggInfoList",
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "IncrementalGroupAggregate": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "aggInfoList",
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "Join": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "leftJoinKey",
+      "input_source": "field",
+      "input_field": "leftInputTypes,rightInputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "LookupJoin": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "lookupKeys",
+      "input_source": "field",
+      "input_field": "inputTypes,lookupInputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "WindowAggregate": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "aggInfoList",
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "WindowJoin": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "leftJoinKey",
+      "input_source": "field",
+      "input_field": "leftInputTypes,rightInputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "GroupWindowAggregate": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "aggInfoList",
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "Deduplicate": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "grouping",
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "Expand": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "projects",
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "GlobalWindowAggregate": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "aggInfoList",
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "LocalWindowAggregate": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "aggInfoList",
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "WatermarkAssigner": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": null,
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "Rank": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "rankFunction",
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "StreamRecordTimestampInserter": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": null,
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "ConstraintEnforcer": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": null,
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "Sink": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": null,
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "Csv Source": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "outputNames",
+      "input_source": "field",
+      "input_field": "outputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "KafKa Source": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "outputNames",
+      "input_source": "field",
+      "input_field": "outputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   },
   "Kafka Sink": {
+    "is_supported": true,
     "supported_list": [],
-    "not_supported_list": []
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": null,
+      "input_source": "field",
+      "input_field": "inputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
+  },
+  "Source": {
+    "is_supported": true,
+    "supported_list": [],
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "outputNames",
+      "input_source": "field",
+      "input_field": "outputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
+  },
+  "TableSourceScan": {
+    "is_supported": true,
+    "supported_list": [],
+    "not_supported_list": [],
+    "io_config": {
+      "json_discriminating_key": "outputNames",
+      "input_source": "field",
+      "input_field": "outputTypes",
+      "output_source": "field",
+      "output_field": "outputTypes",
+      "text_input_pattern": "",
+      "text_output_pattern": ""
+    }
   }
 }

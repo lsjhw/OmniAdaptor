@@ -106,14 +106,18 @@ class TestFlinkLogParser(unittest.TestCase):
         ]
 
         self.args = argparse.Namespace(
-            host='127.0.0.1',
-            port=8081,
+            url='http://127.0.0.1:8081',
             interval=1000,
             timeout=30,
-            use_https=False,
+            no_ssl_verify=False,
             ssl_verify=True,
             output_dir=None,
-            show_op_details=True
+            show_op_details=True,
+            jobid=None,
+            header=None,
+            kerberos=False,
+            kerberos_mutual_auth='OPTIONAL',
+            input_data=None,
         )
         self.output_dir = "./tmp_output"
         self.args.output_dir = self.output_dir

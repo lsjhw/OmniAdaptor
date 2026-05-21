@@ -110,4 +110,13 @@ public abstract class AbstractValidateOperatorStrategy {
         }
         return dataTypes;
     }
+
+    protected String getStringInfo(Map<String, Object> jsonMap, String name) {
+        Object info = jsonMap.get(name);
+        if (info instanceof String) {
+            return (String) info;
+        } else {
+            return null;
+        }
+    }
 }

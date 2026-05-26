@@ -25,10 +25,10 @@ import java.util.*;
 public class ValidateGroupWindowAggOPStrategy extends AbstractValidateOperatorStrategy {
     private static final Logger LOG = LoggerFactory.getLogger(ValidateGroupWindowAggOPStrategy.class);
 
-    private static final Set<String> SUPPORT_AGG_FUNCTION_NAME = new HashSet<>(Arrays.asList("COUNT", "SUM"));
+    private static final Set<String> SUPPORT_AGG_FUNCTION_NAME = new HashSet<>(Arrays.asList("COUNT", "SUM", "MAX", "MIN"));
 
     private static final Set<String> SUPPORT_WINDOW_TYPE = new HashSet<>(
-        Collections.singletonList("SessionGroupWindow"));
+        Arrays.asList("SessionGroupWindow", "TumblingGroupWindow", "SlidingGroupWindow"));
 
     private static final Set<String> SUPPORT_TIME_TYPE = new HashSet<>(
         Collections.singletonList("event"));
@@ -38,6 +38,8 @@ public class ValidateGroupWindowAggOPStrategy extends AbstractValidateOperatorSt
     static {
         SUPPORT_AGG_FUNCTION_DATATYPE.put("COUNT", Collections.singletonList("BIGINT"));
         SUPPORT_AGG_FUNCTION_DATATYPE.put("SUM", Collections.singletonList("BIGINT"));
+        SUPPORT_AGG_FUNCTION_DATATYPE.put("MAX", Collections.singletonList("BIGINT"));
+        SUPPORT_AGG_FUNCTION_DATATYPE.put("MIN", Collections.singletonList("BIGINT"));
     }
 
     @SuppressWarnings("unchecked")

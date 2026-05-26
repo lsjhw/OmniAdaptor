@@ -17,6 +17,8 @@ import static org.apache.flink.util.Preconditions.checkState;
 import com.huawei.omniruntime.flink.runtime.api.graph.json.TaskManagerServicesConfigurationPOJO;
 import com.huawei.omniruntime.flink.runtime.api.graph.json.descriptor.ResourceIDPOJO;
 
+import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.MemorySize;
 import org.apache.flink.configuration.NettyShuffleEnvironmentOptions;
@@ -41,7 +43,8 @@ import java.util.Optional;
  */
 public class OmniTaskManagerServicesConfiguration {
     private static final Logger LOG = LoggerFactory.getLogger(OmniTaskManagerServices.class);
-
+    private static final ConfigOption<Integer> segmentSizeOption = ConfigOptions.key("omni.segment.size").intType().defaultValue(3000);
+    private static final ConfigOption<Integer> totalSegmentsOptions = ConfigOptions.key("omni.total.segments").intType().defaultValue(32768);
 
     /**
      * fromConfiguration
@@ -111,7 +114,7 @@ public class OmniTaskManagerServicesConfiguration {
                         taskManagerServicesConfiguration.getNetworkMemorySize(),
                         localCommunicationOnly,
                         bindAddress);
-        return new TaskManagerServicesConfigurationPOJO(
+        TaskManagerServicesConfigurationPOJO taskManagerServicesConfigurationPOJO = new TaskManagerServicesConfigurationPOJO(
                 new ResourceIDPOJO(Optional.of(resourceID)),
                 memorySizeInBytes,
                 pageSize,
@@ -120,5 +123,8 @@ public class OmniTaskManagerServicesConfiguration {
                 externalAddress,
                 localCommunicationOnly,
                 networkConfig);
+        taskManagerServicesConfigurationPOJO.setSegmentSize(configuration.getInteger(segmentSizeOption));
+        taskManagerServicesConfigurationPOJO.setNumberofSegmentsGlobal(configuration.getInteger(totalSegmentsOptions));
+        return taskManagerServicesConfigurationPOJO;
     }
 }

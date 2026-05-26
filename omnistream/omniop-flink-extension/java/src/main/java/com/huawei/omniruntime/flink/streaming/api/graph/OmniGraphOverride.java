@@ -245,8 +245,7 @@ public final class OmniGraphOverride {
                                                     Map<Integer, StreamingJobGraphGenerator.OperatorChainInfo> chainInfos,
                                                     Map<Integer, Map<Integer, StreamConfig>> chainedConfigs,
                                                     Map<Integer, StreamConfig> vertexConfigs,
-                                                    JobType jobType,
-                                                    boolean checkpointingEnabled) {
+                                                    JobType jobType) {
 
         StreamConfig vertexConfig = new StreamConfig(vertexEntry.getValue().getConfiguration());
         Integer vertexID = vertexEntry.getKey();
@@ -255,15 +254,7 @@ public final class OmniGraphOverride {
 
         JobVertex jobVertex = vertexEntry.getValue();
 
-        if (validateVertexChainInfoForOmniTask(vertexID, chainInfos, chainedConfigs, jobVertex, vertexConfigs,
-                jobType, checkpointingEnabled)) {
-            if (checkpointingEnabled && (vertexConfig.getOperatorName().contains("Source")
-                    || vertexConfig.getOperatorName().contains("Sink")
-                    || vertexConfig.getOperatorName().contains("Map"))) {
-                LOG.info("validateVertexForOmniTask  false for : vertexID is {}, and vertexName {}", vertexID, vertexConfig.getOperatorName());
-                vertexConfig.setUseOmniEnabled(false);
-                return false;
-            }
+        if (validateVertexChainInfoForOmniTask(vertexID, chainInfos, chainedConfigs, jobVertex, vertexConfigs, jobType)) {
             LOG.info("validateVertexForOmniTask  true for : vertexID is {}, and vertexName {}", vertexID, vertexConfig.getOperatorName());
             vertexConfig.setUseOmniEnabled(true);
             return true;
@@ -314,8 +305,7 @@ public final class OmniGraphOverride {
     private static boolean validateVertexChainInfoForOmniTask(Integer vertexID,
                                                               Map<Integer, StreamingJobGraphGenerator.OperatorChainInfo> chainInfos,
                                                               Map<Integer, Map<Integer, StreamConfig>> chainedConfigs, JobVertex jobVertex,
-                                                              Map<Integer, StreamConfig> vertexConfigs, JobType jobType,
-                                                              boolean checkpointingEnabled) {
+                                                              Map<Integer, StreamConfig> vertexConfigs, JobType jobType) {
         // walkthrough each operator
         StreamingJobGraphGenerator.OperatorChainInfo chainInfo = chainInfos.get(vertexID);
         if (chainInfo == null) {
@@ -326,7 +316,7 @@ public final class OmniGraphOverride {
         StreamGraph streamGraph = chainInfo.getStreamGraph();
         List<StreamNode> chainedNode = chainInfo.getAllChainedNodes();
         for (StreamNode node : chainedNode) {
-            if (validateNodeForOmniTask(vertexID, vertexConfigs, jobType, streamGraph, node, checkpointingEnabled)) {
+            if (validateNodeForOmniTask(vertexID, vertexConfigs, jobType, streamGraph, node)) {
                 return false;
             }
         }
@@ -334,8 +324,7 @@ public final class OmniGraphOverride {
         StreamNode lastNode = chainedNode.get(0);
         StreamNode firstNode = chainedNode.get(chainedNode.size() - 1);
 
-        if (checkpointingEnabled
-                && jobType == JobType.STREAM
+        if (jobType == JobType.STREAM
                 && "Map".equals(lastNode.getOperatorName())
                 && firstNode.getOperatorFactory() instanceof SourceOperatorFactory) {
             SourceOperatorFactory<?> sourceOperatorFactory = (SourceOperatorFactory<?>) firstNode.getOperatorFactory();
@@ -408,8 +397,7 @@ public final class OmniGraphOverride {
     }
 
     private static boolean validateNodeForOmniTask(Integer vertexID, Map<Integer, StreamConfig> vertexConfigs,
-                                                   JobType jobType, StreamGraph streamGraph, StreamNode node,
-                                                   boolean checkpointingEnabled) {
+                                                   JobType jobType, StreamGraph streamGraph, StreamNode node) {
         String operatorName = node.getOperatorName();
         String operatorDescription = node.getOperatorDescription();
         switch (jobType) {
@@ -436,7 +424,7 @@ public final class OmniGraphOverride {
                 boolean result;
                 try {
                     result = validateWatermark(node) && StreamNodeOptimized.getInstance().setExtraDescription(
-                            node, streamConfig, streamGraph, jobType, checkpointingEnabled);
+                            node, streamConfig, streamGraph, jobType);
                 } catch (NoSuchFieldException | IllegalAccessException | IOException | ClassNotFoundException e) {
                     throw new FlinkRuntimeException(
                             "Error occurs during the process of compatibility between new and old sinks or sources", e);

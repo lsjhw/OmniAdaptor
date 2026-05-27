@@ -239,10 +239,12 @@ class FlinkParser:
 
     @staticmethod
     def parse_performance_stats(vid, metrics_raw, jobs=None):
-        if not metrics_raw:
+        if not metrics_raw or not isinstance(metrics_raw, list):
             return {"operators": {}, "summary": {}, "analysis": {}}
-
-        raw_map = {item['id']: item['value'] for item in metrics_raw}
+        valid_metrics = [item for item in metrics_raw if isinstance(item, dict) and 'id' in item and 'value' in item]
+        if not valid_metrics:
+            return {"operators": {}, "summary": {}, "analysis": {}}
+        raw_map = {item['id']: item['value'] for item in valid_metrics}
         operator_stats = FlinkParser.group_metrics_by_operator(raw_map)
         operator_stats = FlinkParser.calc_active_duration(operator_stats)
         summary = FlinkParser.calc_summary(operator_stats)
@@ -563,6 +565,35 @@ class FlinkParser:
                 aggregated[key] = dict(op)
         return list(aggregated.values())
 
+    @staticmethod
+    def _extract_op_type(desc_item):
+
+        if not isinstance(desc_item, str):
+            return None
+
+        op_match = re.match(r'\[(\d+)\]:([A-Za-z]+)', desc_item)
+
+        if not op_match:
+            return None
+
+        return op_match.group(2)
+
+    @staticmethod
+    def _aggregate_metrics_by_type(operators_metrics):
+        """
+        将 operators_metrics 聚合成 {op_type: {num_in, num_out, run_time, count}}
+        """
+        metrics_by_type = {}
+        for op_type, op_list in operators_metrics.items():
+            num_in, num_in_sec, num_out, num_out_sec = FlinkParser.aggregate_metrics(op_list)
+            metrics_by_type[op_type] = {
+                "num_in": num_in,
+                "num_out": num_out,
+                "run_time": FlinkParser.compute_runtime(num_in, num_in_sec, num_out, num_out_sec),
+                "count": len(op_list),
+            }
+        return metrics_by_type
+
     def set_table_schema(self, table_schema, column_type, table_column_type):
         self.type_resolver = FlinkTypeResolver(table_schema, column_type, table_column_type)
 
@@ -834,48 +865,41 @@ class FlinkParser:
         return ops
 
     def _build_schema_chain_for_vertex(self, description_data, upstream_context=None):
+        """构建当前 vertex 的 schema chain"""
+
         schema_chain = []
+
         upstream_context = upstream_context or {}
         upstream_alias_map = upstream_context.get("alias_map", {})
         upstream_output_schema = upstream_context.get("output_schema")
 
         current_input = upstream_output_schema
         accumulated_alias_map = dict(upstream_alias_map)
+
         if accumulated_alias_map:
             self.type_resolver.update_alias_map(accumulated_alias_map)
 
         for desc_item in description_data:
-            op_type = None
-            if isinstance(desc_item, str):
-                op_match = re.match(r'\[(\d+)\]:([A-Za-z]+)', desc_item)
-                if op_match:
-                    op_type = op_match.group(2)
+            op_type = self._extract_op_type(desc_item)
+            # source 节点处理
+            if self._is_source_or_first_op(op_type, schema_chain, current_input):
+                tables, output_schema = (self.type_resolver.extract_table_source_info(description_data))
 
-            if op_type in self.SOURCE_OP_TYPES or (not schema_chain and op_type is None and not current_input):
-                tables, output_schema = self.type_resolver.extract_table_source_info(description_data)
                 if output_schema:
-                    schema_chain.append({
-                        "op_type": op_type or "Source",
-                        "input_schema": [],
-                        "output_schema": output_schema,
-                        "tables": tables,
-                        "alias_map": dict(accumulated_alias_map),
-                    })
-                    for table_name in tables:
-                        table_cols = self.type_resolver.table_schema.get(table_name, [])
-                        if table_cols:
-                            col_type, table_col_type = TableSchemaReader.build_column_type_mapping(
-                                self.type_resolver.table_schema, {table_name}
-                            )
-                            self.type_resolver.update_column_type(col_type, table_col_type)
+                    self._append_source_schema_chain(
+                        schema_chain=schema_chain,
+                        op_type=op_type,
+                        tables=tables,
+                        output_schema=output_schema,
+                        alias_map=accumulated_alias_map,
+                    )
                     current_input = output_schema
                 continue
 
+            # 普通 operator
             if op_type and current_input is not None:
-                output_schema = self.type_resolver.build_output_schema(
-                    op_type, description_data, current_input
-                )
-                op_alias_map = self.type_resolver.extract_alias_map_from_description(description_data)
+                output_schema = self.type_resolver.build_output_schema(op_type, description_data, current_input)
+                op_alias_map = (self.type_resolver.extract_alias_map_from_description(description_data))
                 accumulated_alias_map.update(op_alias_map)
                 self.type_resolver.update_alias_map(accumulated_alias_map)
                 schema_chain.append({
@@ -884,28 +908,86 @@ class FlinkParser:
                     "output_schema": output_schema,
                     "alias_map": dict(accumulated_alias_map),
                 })
+
                 current_input = output_schema
 
-        if not schema_chain and current_input:
+        # fallback
+        if not schema_chain:
+            self._append_upstream_or_source(
+                schema_chain=schema_chain,
+                current_input=current_input,
+                description_data=description_data,
+                alias_map=accumulated_alias_map,
+            )
+
+        return schema_chain
+
+    def _is_source_or_first_op(self, op_type, schema_chain, current_input):
+
+        return (
+                op_type in self.SOURCE_OP_TYPES
+                or (
+                        not schema_chain
+                        and op_type is None
+                        and not current_input
+                )
+        )
+
+    def _append_source_schema_chain(self, schema_chain, op_type, tables, output_schema, alias_map):
+        schema_chain.append({
+            "op_type": op_type or "Source",
+            "input_schema": [],
+            "output_schema": output_schema,
+            "tables": tables,
+            "alias_map": dict(alias_map),
+        })
+
+        self._update_table_column_types(tables)
+
+    def _update_table_column_types(self, tables):
+
+        for table_name in tables:
+
+            table_cols = self.type_resolver.table_schema.get(table_name, [])
+
+            if not table_cols:
+                continue
+
+            col_type, table_col_type = (
+                TableSchemaReader.build_column_type_mapping(self.type_resolver.table_schema, {table_name})
+            )
+
+            self.type_resolver.update_column_type(col_type, table_col_type)
+
+    def _append_upstream_or_source(self, schema_chain, current_input, description_data, alias_map):
+
+        # upstream fallback
+        if current_input:
             schema_chain.append({
                 "op_type": "Upstream",
                 "input_schema": [],
                 "output_schema": current_input,
-                "alias_map": dict(accumulated_alias_map),
+                "alias_map": dict(alias_map),
             })
 
-        if not schema_chain and description_data:
-            tables, output_schema = self.type_resolver.extract_table_source_info(description_data)
-            if output_schema:
-                schema_chain.append({
-                    "op_type": "Source",
-                    "input_schema": [],
-                    "output_schema": output_schema,
-                    "tables": tables,
-                    "alias_map": dict(accumulated_alias_map),
-                })
+            return
 
-        return schema_chain
+        # source fallback
+        if not description_data:
+            return
+
+        tables, output_schema = (self.type_resolver.extract_table_source_info(description_data))
+
+        if not output_schema:
+            return
+
+        self._append_source_schema_chain(
+            schema_chain=schema_chain,
+            op_type="Source",
+            tables=tables,
+            output_schema=output_schema,
+            alias_map=alias_map,
+        )
 
     def _get_input_schema_for_op(self, op_type, schema_chain):
         if not schema_chain:
@@ -995,74 +1077,114 @@ class FlinkParser:
         if schema_chain:
             result["output_schema"] = schema_chain[-1].get("output_schema")
             result["alias_map"] = final_alias_map
-        return result if ops or func_list else None
+        # ★ 修改点：任务指标获取失败时不返回 None，确保 jobID、taskID 和状态信息能传递到输出
+        return result
 
-    def _build_ops_from_schema_chain(self, schema_chain, operators_metrics):
+    def _build_ops_from_schema_chain(self, schema_chain, operators_metrics, description_data=None):
+        """
+        构建 ops 列表：
+          - schema_chain 指定了输入输出 schema
+          - operators_metrics 提供实际执行 metrics
+          - description_data 用于 fallback type 提取
+        """
         if not schema_chain:
+            # schema_chain 不存在时直接从 metrics 收集
             ops = self._collect_valid_operators(operators_metrics)
             return self._aggregate_ops_by_name_and_types(ops)
 
-        metrics_by_type = {}
-        for op_type, op_list in operators_metrics.items():
-            num_in, num_in_sec, num_out, num_out_sec = FlinkParser.aggregate_metrics(op_list)
-            metrics_by_type[op_type] = {
-                "num_in": num_in,
-                "num_out": num_out,
-                "run_time": FlinkParser.compute_runtime(num_in, num_in_sec, num_out, num_out_sec),
-                "count": len(op_list),
-            }
-
+        metrics_by_type = self._aggregate_metrics_by_type(operators_metrics)
         type_occurrence = {}
         ops = []
-        for chain_entry in schema_chain:
-            op_type = chain_entry.get("op_type", "")
+
+        # 遍历 schema_chain 构建 ops
+        for entry in schema_chain:
+            op_type = entry.get("op_type", "")
             if op_type == "Upstream":
                 continue
 
-            input_schema = chain_entry.get("input_schema", [])
-            output_schema = chain_entry.get("output_schema", [])
-
-            input_types = [f.get("field_type", "unknown") for f in output_schema] if output_schema else []
-            input_str = ",".join(t for t in input_types if t)
-            output_str = ""
+            input_types_str = self._extract_input_types_from_schema_entry(
+                entry, description_data
+            )
 
             metrics = metrics_by_type.get(op_type, {})
             type_occurrence[op_type] = type_occurrence.get(op_type, 0) + 1
             total_of_type = sum(1 for e in schema_chain if e.get("op_type") == op_type)
             count = 1 if total_of_type > 1 else metrics.get("count", 1)
 
-            ops.append({
-                "op_type": op_type,
-                "is_supported": self.is_operator_supported(op_type),
-                "num_in": metrics.get("num_in", 0),
-                "num_out": metrics.get("num_out", 0),
-                "run_time": metrics.get("run_time", 0.0),
-                "count": count,
-                "input_types_str": input_str,
-                "output_types_str": output_str,
-            })
+            ops.append(self._build_op_entry(op_type, input_types_str, metrics, count))
 
-        for op_type, metrics in metrics_by_type.items():
-            if not any(e.get("op_type") == op_type for e in schema_chain):
-                ops.append({
-                    "op_type": op_type,
-                    "is_supported": self.is_operator_supported(op_type),
-                    "num_in": metrics["num_in"],
-                    "num_out": metrics["num_out"],
-                    "run_time": metrics["run_time"],
-                    "count": metrics["count"],
-                    "input_types_str": "",
-                    "output_types_str": "",
-                })
+        # 补充 metrics 中存在但 schema_chain 没有的 ops
+        self._append_missing_metrics_ops(ops, metrics_by_type, schema_chain, description_data)
 
         return self._aggregate_ops_by_name_and_types(ops)
+
+    def _extract_input_types_from_schema_entry(self, chain_entry, description_data):
+        """
+        从 schema_chain entry 中提取 input_types_str：
+          - 展开 ROW 类型
+          - fallback description_data
+        """
+        op_type = chain_entry.get("op_type", "")
+        output_schema = chain_entry.get("output_schema", [])
+        input_types = []
+
+        if output_schema:
+            for f in output_schema:
+                field_type = f.get("field_type", "unknown")
+                if field_type == "ROW":
+                    original_type = f.get("original_type", "")
+                    if original_type and original_type.upper().startswith("ROW"):
+                        input_types.extend(TypeNormalizer.expand_row_type(original_type))
+                    else:
+                        input_types.append(field_type)
+                else:
+                    input_types.append(field_type)
+
+        input_str = ",".join(t for t in input_types if t)
+
+        # fallback: schema_chain 没有类型但 description_data 有
+        if not input_str and not self.is_operator_supported(op_type) and description_data:
+            input_str = self._extract_types_from_description(op_type, description_data, chain_entry.get("input_schema"))
+
+        return input_str
+
+    def _build_op_entry(self, op_type, input_types_str, metrics, count):
+        """
+        构建单条 op dict
+        """
+        return {
+            "op_type": op_type,
+            "is_supported": self.is_operator_supported(op_type),
+            "num_in": metrics.get("num_in", 0),
+            "num_out": metrics.get("num_out", 0),
+            "run_time": metrics.get("run_time", 0.0),
+            "count": count,
+            "input_types_str": input_types_str,
+            "output_types_str": "",
+        }
+
+    def _append_missing_metrics_ops(self, ops, metrics_by_type, schema_chain, description_data):
+        """
+        补充 metrics 中存在但 schema_chain 没有的 op
+        """
+        for op_type, metrics in metrics_by_type.items():
+            if any(e.get("op_type") == op_type for e in schema_chain):
+                continue
+
+            input_str = ""
+            if not self.is_operator_supported(op_type) and description_data:
+                input_str = self._extract_types_from_description(op_type, description_data, None)
+
+            ops.append(self._build_op_entry(op_type, input_str, metrics, metrics["count"]))
 
     def _build_rows_for_task(self, data):
         job_id, task_id, status = data["jobid"], data["taskid"], data["status"]
         ops, func_list = data["ops"], data["func_list"]
         if not ops and not func_list:
-            # 返回一行仅包含基础信息（Job/Task/Status）的空行，确保 ID 对得上
-            return [self._create_empty_row(job_id, task_id, status)]
+            # ★ 修改点：任务指标获取失败时（如 VERTEX_METRICS_FAILED），生成空行保留 jobID、taskID 和状态
+            if status != "SUCCESS":
+                return [self._create_empty_row(job_id, task_id, status)]
+            return []
         rows, max_len = [], max(len(ops), len(func_list))
         for i in range(max_len):
             row = self._create_empty_row(job_id, task_id, status)
@@ -1079,3 +1201,105 @@ class FlinkParser:
                 })
             rows.append(row)
         return rows
+
+    def _get_original_type_from_schema(self, field_expr, input_schema):
+        """从 input_schema 中查找字段的原始类型（保留 ROW 等复杂类型的完整定义）"""
+        if not input_schema or not field_expr:
+            return None
+
+        field_name = field_expr.strip().lower()
+        # 去除可能的 [index] 后缀
+        field_name = re.sub(r'\[\d+\]$', '', field_name)
+
+        # 先从 table_schema 中查找原始类型
+        if field_name in self.type_resolver.column_type:
+            col_name = field_name
+        else:
+            col_name = None
+
+        if col_name:
+            for table_name, columns in self.type_resolver.table_schema.items():
+                for col_info in columns:
+                    if col_info["field_name"].lower() == col_name:
+                        original = col_info.get("original_type", "")
+                        if original and original.upper().startswith("ROW"):
+                            return original
+
+        # 从 input_schema 中查找
+        for field in input_schema:
+            if field.get("field_name", "").lower() == field_name:
+                return field.get("original_type")
+
+        return None
+
+    def _extract_types_from_select(self, select_str, input_schema):
+        types = []
+        items = self.type_resolver._split_select_items(select_str)
+        for item in items:
+            item = item.strip()
+            if not item:
+                continue
+            original_expr, alias_name = self.type_resolver._split_alias_from_expr(item)
+            field_type = self.type_resolver.resolve_text_expr_type(original_expr, input_schema, 0)
+            if field_type != "unknown":
+                # ROW 类型展开嵌套字段类型
+                original_type = self._get_original_type_from_schema(original_expr, input_schema)
+                if original_type and original_type.upper().startswith("ROW"):
+                    expanded = TypeNormalizer.expand_row_type(original_type)
+                    types.extend(expanded)
+                else:
+                    types.append(field_type)
+            elif input_schema:
+                types.append("unknown")
+            else:
+                types.append("unknown")
+        return types
+
+    def _extract_types_from_field(self, field_str, input_schema):
+        types = []
+        fields = field_str.split(",")
+        for field in fields:
+            field = field.strip()
+            if not field:
+                continue
+            if input_schema:
+                field_type = self.type_resolver.resolve_expression_type(field, input_schema)
+                if field_type == "ROW":
+                    # ROW 类型展开嵌套字段类型
+                    original_type = self._get_original_type_from_schema(field, input_schema)
+                    if original_type and original_type.upper().startswith("ROW"):
+                        expanded = TypeNormalizer.expand_row_type(original_type)
+                        types.extend(expanded)
+                    else:
+                        types.append(field_type if field_type else "unknown")
+                else:
+                    types.append(field_type if field_type else "unknown")
+            else:
+                types.append("unknown")
+        return types
+
+    def _extract_types_from_description(self, op_type, description_data, input_schema):
+        for desc in description_data:
+            # ★ 修改点：处理 JSON 格式描述
+            if isinstance(desc, dict):
+                input_types = desc.get("inputTypes", [])
+                if input_types:
+                    return ",".join(TypeNormalizer.normalize_type(t) for t in input_types if t)
+                output_types = desc.get("outputTypes", [])
+                if output_types:
+                    return ",".join(TypeNormalizer.normalize_type(t) for t in output_types if t)
+            # 处理字符串格式描述
+            if isinstance(desc, str):
+                select_match = re.search(r'select=\[(.*?)\]', desc, re.I)
+                if select_match:
+                    select_content = select_match.group(1)
+                    types = self._extract_types_from_select(select_content, input_schema)
+                    if types:
+                        return ",".join(types)
+                field_match = re.search(r'field=\[(.*?)\]', desc, re.I)
+                if field_match:
+                    field_content = field_match.group(1)
+                    types = self._extract_types_from_field(field_content, input_schema)
+                    if types:
+                        return ",".join(types)
+        return ""

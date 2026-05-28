@@ -132,11 +132,17 @@ public final class OmniGraphOverride {
 
     static {
         try {
-            Map<String, String> envMap = System.getenv();
-            if (!CollectionUtil.isNullOrEmpty(envMap) && envMap.containsKey("FLINK_PERFORMANCE")) {
-                String flinkPerformance = envMap.getOrDefault("FLINK_PERFORMANCE", "true");
-                LOG.info("flinkPerformance is {}", flinkPerformance);
-                performanceMode = flinkPerformance.equals("true");
+            String flinkPerformance = System.getProperty("FLINK_PERFORMANCE");
+            if (flinkPerformance != null) {
+                LOG.info("flinkPerformance from JVM property is {}", flinkPerformance);
+                performanceMode = "true".equals(flinkPerformance);
+            } else {
+                Map<String, String> envMap = System.getenv();
+                if (!CollectionUtil.isNullOrEmpty(envMap) && envMap.containsKey("FLINK_PERFORMANCE")) {
+                    flinkPerformance = envMap.getOrDefault("FLINK_PERFORMANCE", "true");
+                    LOG.info("flinkPerformance is {}", flinkPerformance);
+                    performanceMode = "true".equals(flinkPerformance);
+                }
             }
         } catch (Exception exception) {
             LOG.warn("get env failed! ", exception);
@@ -148,7 +154,8 @@ public final class OmniGraphOverride {
                     "LookupJoin",
                     "WatermarkAssigner",
                     "StreamRecordTimestampInserter",
-                    "ConstraintEnforcer"));
+                    "ConstraintEnforcer",
+                    "GroupAggregate"));
         } else {
             SUPPORT_OP_NAME.addAll(Arrays.asList(
                     "Calc",

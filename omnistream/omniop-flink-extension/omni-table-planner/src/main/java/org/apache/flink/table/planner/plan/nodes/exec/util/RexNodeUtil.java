@@ -647,6 +647,8 @@ public class RexNodeUtil {
                             argMap2.put("value", "%Y-%m-%d");
                         } else if ("HH:mm".equals(argMap2.get("value"))) {
                             argMap2.put("value", "%H:%M");
+                        } else if ("HH".equals(argMap2.get("value"))) {
+                            argMap2.put("value", "%H");
                         } else {
                             argMap2.put("value", "INVALID");
                         }

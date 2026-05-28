@@ -1431,18 +1431,9 @@ public class OmniTask extends Task {
 
     private void deleteNativeTask(long nativeTaskToBeDeleted) {
         if (nativeTaskToBeDeleted != 0) {
-            ExecutorService deleteNativeTaskExecutorService = Executors.newSingleThreadExecutor();
-            deleteNativeTaskExecutorService.submit(() -> {
-                long delay = 120;
-                LOG.info("Delete native task {} after {} seconds.", nativeTaskToBeDeleted, delay);
-                try {
-                    Thread.sleep(delay * 1000);
-                } catch (InterruptedException e) {
-                    LOG.error("Interrupted while waiting to delete native task {}", nativeTaskToBeDeleted, e);
-                }
-                doDeleteNativeTask(nativeTaskToBeDeleted);
-                LOG.info("Native task {} has been deleted.", nativeTaskToBeDeleted);
-            });
+            LOG.info("Delete Omni task {} , native task {}, status {}", taskInfo.toString(), nativeTaskToBeDeleted, this.getExecutionState().toString());
+            doDeleteNativeTask(nativeTaskToBeDeleted);
+            LOG.info("Native task {} has been deleted.", nativeTaskToBeDeleted);
         }
     }
 

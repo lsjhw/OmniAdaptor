@@ -193,11 +193,8 @@ public class OmniTaskExecutor extends TaskExecutor {
         try {
             nativeTaskExecutorReference = createNativeTaskExecutor(taskExecutorConfig,
                     omniTaskManagerServices.getNativeOmniTaskManagerServicesAddress());
-        } catch (UnsatisfiedLinkError e) {
-            LOG.error("Failed to create NativeTaskExecutor.", e);
-        } catch (Exception e) {
-            LOG.error("Failed to create NativeTaskExecutor.", e);
-            throw e;
+        } catch (Throwable t) {
+            LOG.error("Failed to create NativeTaskExecutor.", t);
         }
 
         log.info("nativeTaskExecutorReference: " + nativeTaskExecutorReference);
@@ -401,7 +398,7 @@ public class OmniTaskExecutor extends TaskExecutor {
             LOG.info("TaskDeploymentDescriptorPOJO JSON is {}", tddPojoJson);
 
             if (this.nativeTaskExecutorReference == -1) {
-                throw new RuntimeException("nativeTaskExecutorReference cannot be -1.");
+                throw new TaskSubmissionException("nativeTaskExecutorReference cannot be -1.");
             }
 
             long nativeTaskAddress = submitTaskNativeWithCheckpointing(this.nativeTaskExecutorReference, jobInformationPOJOJson,

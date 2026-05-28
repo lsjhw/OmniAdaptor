@@ -37,11 +37,8 @@ public class OmniTaskManagerServices {
         try {
             nativeOmniTaskManagerServicesAddress = createOmniTaskManagerServices(
                     JsonHelper.toJson(taskManagerServicesConfiguration));
-        } catch (UnsatisfiedLinkError e) {
-            LOG.error("Failed to create OmniTaskManagerServices.", e);
-        } catch (Exception e) {
-            LOG.error("Failed to create OmniTaskManagerServices.", e);
-            throw e;
+        } catch (Throwable t) {
+            LOG.error("Failed to create OmniTaskManagerServices.", t);
         }
     }
 

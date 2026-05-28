@@ -282,7 +282,7 @@ class FlinkLogParser:
             res = self._process_vertex(vid, vertex, plan_nodes, jid, detail)
             # 如果 res 是 None，给它一个带状态的占位字典
             vertices[vid] = res if res is not None else {
-                "status": res.get("status", TaskStatus.VERTEX_METRICS_FAILED),
+                "status": TaskStatus.VERTEX_METRICS_FAILED,
                 "vertex_name": vertex.get("name"),
                 "logic_metadata": {"full_description": ""},
                 "summary_metrics": {"operators": {}, "summary": {}, "analysis": {}}
@@ -294,8 +294,8 @@ class FlinkLogParser:
 
     def _process_vertex(self, vid, vertex, plan_nodes, jid, detail):
         """处理单个 vertex 的解析"""
-        # 预定义空指标结构，避免重复书写
         metrics = self._get_vertex_metrics(vid, jid)
+        # ★ 修改点：获取 description 和算子信息（即使指标获取失败也需要）
         description = self._get_description(vid, plan_nodes)
         description_data = self._parse_description_data(description)
         plan_node = plan_nodes.get(vid, {})
@@ -306,16 +306,19 @@ class FlinkLogParser:
                 upstream_ids.append(inp.get("id", ""))
             elif isinstance(inp, str):
                 upstream_ids.append(inp)
-        error_status = metrics.get("error_status")
-        metric_values = metrics.get("values")
-        empty_payload = {"operators": {}, "summary": {}, "analysis": {}}
-        # 统一错误处理逻辑
-        # 如果有显式错误状态，或者没有获取到具体的 values，则判定为失败
-        if error_status or not metric_values:
-            status = error_status or TaskStatus.VERTEX_METRICS_FAILED
-            return self._create_vertex_result(
-                vid, jid, vertex, status, description, empty_payload, description_data,upstream_ids
-            )
+        # ★ 修改点：检查是否返回了错误状态
+        if metrics.get("error_status"):
+            error_status = metrics["error_status"]
+            logger.warning(f"Vertex {vid} in job {jid} failed with status: {error_status}")
+            # 构建空的 operators 但保留算子名称信息
+            empty_stats = {"operators": {}, "summary": {}, "analysis": {}}
+            return self._create_vertex_result(vid, jid, vertex, error_status, description,
+                                              empty_stats, description_data, upstream_ids)
+        if not metrics.get("values"):
+            empty_stats = {"operators": {}, "summary": {}, "analysis": {}}
+            return self._create_vertex_result(vid, jid, vertex,
+                                              TaskStatus.VERTEX_METRICS_EMPTY,
+                                              description, empty_stats, description_data, upstream_ids)
         try:
             stats = self._parse_performance_stats(vid, metrics["values"], detail, jid)
             status = TaskStatus.SUCCESS
@@ -323,7 +326,6 @@ class FlinkLogParser:
             logger.error(f"Failed to parse performance stats for vertex {vid}: {e}")
             stats = {"operators": {}, "summary": {}, "analysis": {}}
             status = TaskStatus.OPERATOR_PARSE_FAILED
-
         return self._create_vertex_result(vid, jid, vertex, status, description, stats, description_data, upstream_ids)
 
     def _parse_performance_stats(self, vid, metrics_values, detail, jid):
@@ -335,16 +337,11 @@ class FlinkLogParser:
         available = self.requester.get_vertex_metrics(jid, vid)
         if not available:
             logger.warning(f"No metrics available for vertex {vid} in job {jid}, error: {self.requester.last_error}")
-            # 返回具体的错误状态
+            # ★ 修改点：返回具体错误状态，让调用方知道失败原因
             error_status = self.requester.last_error or TaskStatus.VERTEX_METRICS_FAILED
-
             return {"error_status": error_status, "ids": [], "values": []}
-
         needed_ids = self.parser.filter_num_data(available, self.target_metrics)
-        # 当 show_op_details 为 False 时，过滤掉 runtime、numBytesIn、numBytesOut 相关的指标 ID，
-        # 减少下游 fetch_metrics 的 API 批量请求
         if not getattr(self.args, 'show_op_details', True) and needed_ids:
-            # 假设 MetricType 里的 key 或 Flink 原始指标 ID 包含如下特征关键字，将其踢出请求队列
             exclude_keywords = ["runtime", "BytesIn", "BytesOut"]
             needed_ids = [
                 m_id for m_id in needed_ids
@@ -352,12 +349,15 @@ class FlinkLogParser:
             ]
             logger.debug(
                 f"Optimization: show-op-details is disabled. Filtered API metrics batch to {len(needed_ids)} items.")
-
         if not needed_ids:
             logger.warning(f"No needed metrics found for vertex {vid} in job {jid}")
+            values = available if isinstance(available, list) else []
+        else:
+            values = self.fetch_metrics(jid, vid, needed_ids)
         return {
             "ids": needed_ids,
-            "values": self.fetch_metrics(jid, vid, needed_ids) if needed_ids else []
+            # ★ 修改点：needed_ids 为空时使用 available，避免正常数据被误判为异常
+            "values": values
         }
 
     def analyze_flink_logs(self):

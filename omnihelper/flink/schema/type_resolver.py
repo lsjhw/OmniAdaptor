@@ -6,7 +6,6 @@ from omnihelper.flink.schema.table_schema_reader import TableSchemaReader
 from omnihelper.flink.schema.type_normalizer import TypeNormalizer
 from omnihelper.util.log import logger
 
-
 MAX_DEPTH = 10
 
 UNKNOWN = "unknown"
@@ -29,7 +28,7 @@ TYPE_PATTERNS = [
     (re.compile(r"^\d{4}-\d{2}-\d{2}$"), "DATE"),
     (re.compile(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}"), "TIMESTAMP"),
     (re.compile(r"^INTERVAL\s+", re.I), "INTERVAL"),
-    (re.compile(r"^Sarg\[.*\]$",re.I), "VARCHAR")
+    (re.compile(r"^Sarg\[.*\]$", re.I), "VARCHAR")
 ]
 
 
@@ -156,7 +155,7 @@ class FlinkTypeResolver:
                 return UNKNOWN
 
             if (value_str.startswith("'") and value_str.endswith("'")) or \
-               (value_str.startswith('"') and value_str.endswith('"')):
+                    (value_str.startswith('"') and value_str.endswith('"')):
                 return "VARCHAR"
 
             for pattern, match_type in TYPE_PATTERNS:
@@ -178,7 +177,7 @@ class FlinkTypeResolver:
             return self._resolve_json_expr_type(expr, input_schema, depth)
 
         if isinstance(expr, str):
-            return self._resolve_text_expr_type(expr, input_schema, depth)
+            return self.resolve_text_expr_type(expr, input_schema, depth)
 
         return UNKNOWN
 
@@ -377,7 +376,7 @@ class FlinkTypeResolver:
 
         return UNKNOWN
 
-    def _resolve_text_expr_type(self, expr_str, input_schema, depth):
+    def resolve_text_expr_type(self, expr_str, input_schema, depth):
         if not expr_str or not isinstance(expr_str, str):
             return UNKNOWN
 
@@ -386,7 +385,7 @@ class FlinkTypeResolver:
             return UNKNOWN
 
         if (expr_str.startswith("'") and expr_str.endswith("'")) or \
-           (expr_str.startswith('"') and expr_str.endswith('"')):
+                (expr_str.startswith('"') and expr_str.endswith('"')):
             return "VARCHAR"
 
         for pattern, match_type in TYPE_PATTERNS:
@@ -436,8 +435,8 @@ class FlinkTypeResolver:
         right = op_match.group(3).strip()
         if not left or not right:
             return None
-        left_type = self._resolve_text_expr_type(left, input_schema, depth + 1)
-        right_type = self._resolve_text_expr_type(right, input_schema, depth + 1)
+        left_type = self.resolve_text_expr_type(left, input_schema, depth + 1)
+        right_type = self.resolve_text_expr_type(right, input_schema, depth + 1)
         if left_type != UNKNOWN or right_type != UNKNOWN:
             return "BOOLEAN"
         return None
@@ -446,7 +445,7 @@ class FlinkTypeResolver:
         alias_param = re.sub(r"\[\d+\]$", "", param)
         if alias_param in self.alias_map:
             real_param = self.alias_map[alias_param]
-            return self._resolve_text_expr_type(real_param, None, 0)
+            return self.resolve_text_expr_type(real_param, None, 0)
         return None
 
     def _resolve_text_function_type(self, expr_str, input_schema, depth):
@@ -491,7 +490,7 @@ class FlinkTypeResolver:
             arg = arg.strip()
             if i % 2 == 0 and not (has_else and i == len(args) - 1):
                 continue
-            t = self._resolve_text_expr_type(arg, input_schema, depth + 1)
+            t = self.resolve_text_expr_type(arg, input_schema, depth + 1)
             if t and t != UNKNOWN:
                 value_types.append(t)
 
@@ -513,7 +512,7 @@ class FlinkTypeResolver:
         if not first_arg:
             return None
 
-        arg_type = self._resolve_text_expr_type(first_arg, input_schema, depth + 1)
+        arg_type = self.resolve_text_expr_type(first_arg, input_schema, depth + 1)
         return arg_type if arg_type != UNKNOWN else None
 
     @staticmethod
@@ -529,9 +528,9 @@ class FlinkTypeResolver:
             elif expr_str[i] == ")":
                 depth -= 1
                 if depth == 0:
-                    return expr_str[start + 1 : i]
+                    return expr_str[start + 1: i]
 
-        return expr_str[start + 1 :]
+        return expr_str[start + 1:]
 
     @staticmethod
     def _split_function_args(args_str):
@@ -618,7 +617,7 @@ class FlinkTypeResolver:
                 continue
 
             original_expr, _ = self._split_alias_from_expr(item)
-            t = self._resolve_text_expr_type(original_expr, input_schema, 0)
+            t = self.resolve_text_expr_type(original_expr, input_schema, 0)
             types.append(t)
 
         return types
@@ -675,49 +674,6 @@ class FlinkTypeResolver:
 
         self.update_alias_map(alias_map)
         return alias_map
-
-    def extract_table_source_info(self, description_data):
-        tables = []
-        output_schema = []
-
-        for desc in description_data:
-            if isinstance(desc, dict):
-                origin = desc.get("originDescription", "")
-                output_names = desc.get("outputNames", [])
-                output_types = desc.get("outputTypes", [])
-
-                if output_names and output_types:
-                    for name, type_str in zip(output_names, output_types):
-                        output_schema.append({
-                            "field_name": name,
-                            "field_type": TypeNormalizer.normalize_type(type_str),
-                        })
-
-                table_name = self._extract_table_name_from_origin(origin)
-                if table_name:
-                    tables.append(table_name)
-
-                if not output_schema:
-                    input_types = desc.get("inputTypes", [])
-                    out_types = desc.get("outputTypes", [])
-                    if out_types and not output_names:
-                        for i, type_str in enumerate(out_types):
-                            output_schema.append({
-                                "field_name": f"field_{i}",
-                                "field_type": TypeNormalizer.normalize_type(type_str),
-                            })
-
-            elif isinstance(desc, str):
-                table_name = self._extract_table_name_from_text(desc)
-                if table_name:
-                    tables.append(table_name)
-
-                if not output_schema:
-                    fields = self._extract_fields_from_text(desc)
-                    if fields:
-                        output_schema = fields
-
-        return tables, output_schema
 
     def _extract_table_name_from_origin(self, origin_desc):
         if not origin_desc:
@@ -814,15 +770,18 @@ class FlinkTypeResolver:
         output_schema = []
         output_names = json_desc.get("outputNames", [])
         output_types = json_desc.get("outputTypes", [])
-
         if output_names and output_types:
             for name, type_str in zip(output_names, output_types):
-                output_schema.append({
+                schema_entry = {
                     "field_name": name,
                     "field_type": TypeNormalizer.normalize_type(type_str),
-                })
+                }
+                # ★ 修改点：从 table_schema 中查找原始类型
+                original_type = self._find_original_type_from_table_schema(name)
+                if original_type:
+                    schema_entry["original_type"] = original_type
+                output_schema.append(schema_entry)
             return output_schema
-
         if output_types and not output_names:
             for i, type_str in enumerate(output_types):
                 output_schema.append({
@@ -830,28 +789,36 @@ class FlinkTypeResolver:
                     "field_type": TypeNormalizer.normalize_type(type_str),
                 })
             return output_schema
-
         if op_type == "Calc" and json_desc.get("indices"):
             indices = json_desc.get("indices", [])
             for i, idx_expr in enumerate(indices):
                 if isinstance(idx_expr, dict):
                     field_name = self._resolve_field_name_from_expr(idx_expr, input_schema, i)
                     field_type = self.resolve_expression_type(idx_expr, input_schema)
-                    output_schema.append({
+                    schema_entry = {
                         "field_name": field_name,
                         "field_type": field_type,
-                    })
-
+                    }
+                    # ★ 修改点：从 table_schema 中查找原始类型
+                    original_type = self._find_original_type_from_table_schema(field_name)
+                    if original_type:
+                        schema_entry["original_type"] = original_type
+                    output_schema.append(schema_entry)
         elif op_type == "GroupAggregate":
             grouping = json_desc.get("grouping", [])
             if grouping and input_schema:
                 for idx in grouping:
                     if 0 <= idx < len(input_schema):
-                        output_schema.append({
-                            "field_name": input_schema[idx].get("field_name", f"group_{idx}"),
+                        field_name = input_schema[idx].get("field_name", f"group_{idx}")
+                        schema_entry = {
+                            "field_name": field_name,
                             "field_type": input_schema[idx].get("field_type", UNKNOWN),
-                        })
-
+                        }
+                        # ★ 修改点：从 table_schema 中查找原始类型
+                        original_type = self._find_original_type_from_table_schema(field_name)
+                        if original_type:
+                            schema_entry["original_type"] = original_type
+                        output_schema.append(schema_entry)
             agg_info = json_desc.get("aggInfoList", {})
             agg_calls = agg_info.get("aggregateCalls", [])
             agg_value_types = agg_info.get("aggValueTypes", [])
@@ -862,35 +829,48 @@ class FlinkTypeResolver:
                 else:
                     agg_func = call.get("aggregationFunction", "")
                     field_type = self._resolve_agg_func_return_type(agg_func, input_schema, call)
-                output_schema.append({
+                schema_entry = {
                     "field_name": agg_name,
                     "field_type": field_type,
-                })
-
+                }
+                # ★ 修改点：从 table_schema 中查找原始类型
+                original_type = self._find_original_type_from_table_schema(agg_name)
+                if original_type:
+                    schema_entry["original_type"] = original_type
+                output_schema.append(schema_entry)
         elif op_type in ("Join", "WindowJoin"):
             left_types = json_desc.get("leftInputTypes", [])
             right_types = json_desc.get("rightInputTypes", [])
             all_types = left_types + right_types
             for i, t in enumerate(all_types):
-                output_schema.append({
-                    "field_name": f"field_{i}",
+                field_name = f"field_{i}"
+                schema_entry = {
+                    "field_name": field_name,
                     "field_type": TypeNormalizer.normalize_type(t),
-                })
-
+                }
+                # ★ 修改点：从 table_schema 中查找原始类型
+                original_type = self._find_original_type_from_table_schema(field_name)
+                if original_type:
+                    schema_entry["original_type"] = original_type
+                output_schema.append(schema_entry)
         elif op_type == "LookupJoin":
             input_types = json_desc.get("inputTypes", [])
             lookup_types = json_desc.get("lookupInputTypes", [])
             all_types = input_types + lookup_types
             for i, t in enumerate(all_types):
-                output_schema.append({
-                    "field_name": f"field_{i}",
+                field_name = f"field_{i}"
+                schema_entry = {
+                    "field_name": field_name,
                     "field_type": TypeNormalizer.normalize_type(t),
-                })
-
+                }
+                # ★ 修改点：从 table_schema 中查找原始类型
+                original_type = self._find_original_type_from_table_schema(field_name)
+                if original_type:
+                    schema_entry["original_type"] = original_type
+                output_schema.append(schema_entry)
         else:
             if input_schema:
                 output_schema = list(input_schema)
-
         return output_schema
 
     def _build_output_schema_from_text(self, op_type, description_data, input_schema):
@@ -929,14 +909,17 @@ class FlinkTypeResolver:
             item = item.strip()
             if not item:
                 continue
-
             original_expr, alias_name = self._split_alias_from_expr(item)
-            field_type = self._resolve_text_expr_type(original_expr, input_schema, 0)
-            output_schema.append({
+            field_type = self.resolve_text_expr_type(original_expr, input_schema, 0)
+            schema_entry = {
                 "field_name": alias_name,
                 "field_type": field_type,
-            })
-
+            }
+            # ★ 修改点：从 table_schema 中查找原始类型
+            original_type = self._find_original_type_from_table_schema(alias_name)
+            if original_type:
+                schema_entry["original_type"] = original_type
+            output_schema.append(schema_entry)
         return output_schema
 
     @staticmethod
@@ -951,7 +934,7 @@ class FlinkTypeResolver:
                 depth += 1
             elif c == ")":
                 depth -= 1
-            elif depth == 0 and upper[i:i+4] == " AS " and (i + 4 <= len(expr_str)):
+            elif depth == 0 and upper[i:i + 4] == " AS " and (i + 4 <= len(expr_str)):
                 last_as_pos = i
             i += 1
 
@@ -959,12 +942,162 @@ class FlinkTypeResolver:
             original = expr_str[:last_as_pos].strip()
             alias = expr_str[last_as_pos + 4:].strip()
             if alias and not alias.upper() in (
-                "INT", "BIGINT", "VARCHAR", "DOUBLE", "FLOAT",
-                "BOOLEAN", "DATE", "TIMESTAMP", "DECIMAL",
-                "STRING", "LONG", "SHORT", "BYTE", "CHAR",
-                "TINYINT", "SMALLINT", "BINARY", "VARBINARY",
-                "ARRAY", "MAP", "ROW", "MULTISET",
+                    "INT", "BIGINT", "VARCHAR", "DOUBLE", "FLOAT",
+                    "BOOLEAN", "DATE", "TIMESTAMP", "DECIMAL",
+                    "STRING", "LONG", "SHORT", "BYTE", "CHAR",
+                    "TINYINT", "SMALLINT", "BINARY", "VARBINARY",
+                    "ARRAY", "MAP", "ROW", "MULTISET",
             ):
                 return original, alias
 
         return expr_str, expr_str
+
+    def expand_row_type(self, field_info, parent_name=None):
+        expanded = []
+
+        if isinstance(field_info, str):
+            field_info = {
+                "field_name": field_info,
+                "field_type": "ROW",
+                "nested_fields": []
+            }
+
+        field_name = field_info.get("field_name", "")
+        field_type = field_info.get("field_type", "")
+        nested_fields = field_info.get("nested_fields", [])
+
+        if parent_name:
+            full_name = f"{parent_name}.{field_name}"
+        else:
+            full_name = field_name
+
+        if field_type == "ROW" and nested_fields:
+            for nested_field in nested_fields:
+                nested_name = nested_field.get("field_name", "")
+                nested_type = nested_field.get("field_type", "")
+
+                if nested_type == "ROW" and nested_field.get("nested_fields"):
+                    expanded.extend(
+                        self.expand_row_type(nested_field, full_name)
+                    )
+                else:
+                    expanded.append({
+                        "field_name": f"{full_name}.{nested_name}",
+                        "field_type": nested_type
+                    })
+        else:
+            expanded.append({
+                "field_name": full_name,
+                "field_type": field_type
+            })
+
+        return expanded
+
+    @staticmethod
+    def expand_schema_if_needed(schema):
+        if not schema:
+            return []
+
+        expanded = []
+        for field in schema:
+            field_type = field.get("field_type", "")
+            nested_fields = field.get("nested_fields", [])
+
+            if field_type == "ROW" and nested_fields:
+                expanded.extend(
+                    FlinkTypeResolver._expand_field_recursive(field, "")
+                )
+            else:
+                expanded.append({
+                    "field_name": field.get("field_name", ""),
+                    "field_type": field_type
+                })
+
+        return expanded
+
+    @staticmethod
+    def _expand_field_recursive(field, parent_name):
+        expanded = []
+        field_name = field.get("field_name", "")
+        field_type = field.get("field_type", "")
+        nested_fields = field.get("nested_fields", [])
+
+        if parent_name:
+            full_name = f"{parent_name}.{field_name}"
+        else:
+            full_name = field_name
+
+        if field_type == "ROW" and nested_fields:
+            for nested_field in nested_fields:
+                nested_type = nested_field.get("field_type", "")
+
+                if nested_type == "ROW" and nested_field.get("nested_fields"):
+                    expanded.extend(
+                        FlinkTypeResolver._expand_field_recursive(nested_field, full_name)
+                    )
+                else:
+                    expanded.append({
+                        "field_name": f"{full_name}.{nested_field.get('field_name', '')}",
+                        "field_type": nested_type
+                    })
+        else:
+            expanded.append({
+                "field_name": full_name,
+                "field_type": field_type
+            })
+
+        return expanded
+
+    def extract_table_source_info(self, description_data):
+        tables = []
+        output_schema = []
+        for desc in description_data:
+            if isinstance(desc, dict):
+                origin = desc.get("originDescription", "")
+                output_names = desc.get("outputNames", [])
+                output_types = desc.get("outputTypes", [])
+                if output_names and output_types:
+                    for name, type_str in zip(output_names, output_types):
+                        schema_entry = {
+                            "field_name": name,
+                            "field_type": TypeNormalizer.normalize_type(type_str),
+                        }
+                        # ★ 修改点：从 table_schema 中查找原始类型（保留 ROW 等复杂类型的完整定义）
+                        original_type = self._find_original_type_from_table_schema(name)
+                        if original_type:
+                            schema_entry["original_type"] = original_type
+                        output_schema.append(schema_entry)
+                table_name = self._extract_table_name_from_origin(origin)
+                if table_name:
+                    tables.append(table_name)
+                if not output_schema:
+                    input_types = desc.get("inputTypes", [])
+                    out_types = desc.get("outputTypes", [])
+                    if out_types and not output_names:
+                        for i, type_str in enumerate(out_types):
+                            output_schema.append({
+                                "field_name": f"field_{i}",
+                                "field_type": TypeNormalizer.normalize_type(type_str),
+                            })
+            elif isinstance(desc, str):
+                table_name = self._extract_table_name_from_text(desc)
+                if table_name:
+                    tables.append(table_name)
+                if not output_schema:
+                    fields = self._extract_fields_from_text(desc)
+                    if fields:
+                        output_schema = fields
+        return tables, output_schema
+
+    def _find_original_type_from_table_schema(self, field_name):
+        """从 table_schema 中查找字段的原始类型"""
+        if not field_name or not self.table_schema:
+            return None
+        name_lower = field_name.lower()
+        for table_name, columns in self.table_schema.items():
+            for col_info in columns:
+                if col_info["field_name"].lower() == name_lower:
+                    original = col_info.get("original_type", "")
+                    if original and original.upper().startswith("ROW"):
+                        return original
+        return None

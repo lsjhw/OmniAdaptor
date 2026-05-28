@@ -217,3 +217,37 @@ class TypeNormalizer:
                 return None
 
         return result
+
+    @staticmethod
+    def expand_row_type(type_str):
+        """
+        将 ROW 类型递归展开为嵌套字段的类型列表。
+        例如: ROW<id INT, name VARCHAR, addr ROW<city VARCHAR, zip INT>>
+        返回: ["INT", "VARCHAR", "VARCHAR", "INT"]
+        对于非 ROW 类型，返回包含标准化类型的列表。
+        """
+        if not type_str:
+            return ["unknown"]
+        type_str = type_str.strip()
+        if not type_str.upper().startswith("ROW"):
+            return [TypeNormalizer.normalize_type(type_str)]
+        inner = TypeNormalizer._extract_angle_brackets_content(type_str)
+        if not inner:
+            return ["ROW"]
+        parts = TypeNormalizer._split_row_fields(inner)
+        expanded = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            match = re.match(r"^(\w+)\s+(.+)$", part.strip())
+            if not match:
+                continue
+            field_type_str = match.group(2).strip()
+            # 递归展开嵌套的 ROW 类型
+            if field_type_str.upper().startswith("ROW"):
+                nested_expanded = TypeNormalizer.expand_row_type(field_type_str)
+                expanded.extend(nested_expanded)
+            else:
+                expanded.append(TypeNormalizer.normalize_type(field_type_str))
+        return expanded if expanded else ["ROW"]

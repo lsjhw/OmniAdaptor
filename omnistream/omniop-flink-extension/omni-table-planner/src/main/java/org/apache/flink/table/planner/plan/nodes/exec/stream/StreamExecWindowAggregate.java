@@ -386,6 +386,7 @@ public class StreamExecWindowAggregate extends StreamExecWindowAggregateBase {
         } else {
             throw new UnsupportedOperationException(windowSpec + " is not supported yet.");
         }
+        jsonMap.put("shiftTimeZone", shiftTimeZone.toString());
     }
 
     private GeneratedNamespaceAggsHandleFunction<Long> createAggsHandler(

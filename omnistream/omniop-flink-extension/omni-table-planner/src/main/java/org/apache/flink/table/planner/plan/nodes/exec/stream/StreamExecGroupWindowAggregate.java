@@ -463,6 +463,7 @@ public class StreamExecGroupWindowAggregate extends StreamExecAggregateBase {
             jsonMap.put("windowSlide", windowSlide);
         }
         jsonMap.put("inputTimeFieldIndex", inputTimeFieldIndex);
+        jsonMap.put("shiftTimeZone", shiftTimeZone.toString());
     }
 
     private LogicalType[] extractLogicalTypes(DataType[] dataTypes) {

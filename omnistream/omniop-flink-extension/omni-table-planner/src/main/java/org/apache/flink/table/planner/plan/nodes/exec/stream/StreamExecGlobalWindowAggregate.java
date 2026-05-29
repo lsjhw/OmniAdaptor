@@ -270,6 +270,7 @@ public class StreamExecGlobalWindowAggregate extends StreamExecWindowAggregateBa
         } else {
             throw new UnsupportedOperationException(windowSpec + " is not supported yet.");
         }
+        jsonMap.put("shiftTimeZone", shiftTimeZone.toString());
     }
 
     @SuppressWarnings("unchecked")

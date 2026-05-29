@@ -153,7 +153,7 @@ public class StreamExecWindowJoin extends ExecNodeBase<RowData>
         }
     }
 
-    private String getExtraDescription(String oldDescription, RowType leftType, RowType rightType, int leftWindowEndIndex, int rightWindowEndIndex) {
+    private String getExtraDescription(String oldDescription, RowType leftType, RowType rightType, int leftWindowEndIndex, int rightWindowEndIndex, ZoneId shiftTimeZone) {
         ObjectMapper objectMapper = JacksonMapperFactory.createObjectMapper();
         // get inputType info
         List<String> leftInputTypeList = new ArrayList<>();
@@ -215,6 +215,7 @@ public class StreamExecWindowJoin extends ExecNodeBase<RowData>
         jsonMap.put("rightTimeAttributeType", rightTypeName);
         jsonMap.put("leftWindowEndIndex", leftWindowEndIndex);
         jsonMap.put("rightWindowEndIndex", rightWindowEndIndex);
+        jsonMap.put("shiftTimeZone", shiftTimeZone.toString());
 
         String jsonString = "";
         try {
@@ -292,7 +293,7 @@ public class StreamExecWindowJoin extends ExecNodeBase<RowData>
                         planner.getFlinkContext().getClassLoader(), rightJoinKey, rightTypeInfo);
         transform.setStateKeySelectors(leftSelect, rightSelect);
         transform.setStateKeyType(leftSelect.getProducedType());
-        transform.setDescription(getExtraDescription(transform.getDescription(), leftType, rightType, leftWindowEndIndex, rightWindowEndIndex));
+        transform.setDescription(getExtraDescription(transform.getDescription(), leftType, rightType, leftWindowEndIndex, rightWindowEndIndex, shiftTimeZone));
         return transform;
     }
 }

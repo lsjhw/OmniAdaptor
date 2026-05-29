@@ -376,8 +376,11 @@ class FlinkTypeResolver:
 
         return UNKNOWN
 
-    def resolve_text_expr_type(self, expr_str, input_schema, depth):
+    def resolve_text_expr_type(self, expr_str, input_schema, depth, visited=None):
         if not expr_str or not isinstance(expr_str, str):
+            return UNKNOWN
+
+        if depth > 20:
             return UNKNOWN
 
         expr_str = expr_str.strip()
@@ -412,7 +415,7 @@ class FlinkTypeResolver:
                 if field.get("field_name", "").lower() == name_lower:
                     return field.get("field_type", UNKNOWN)
 
-        alias_resolved = self._resolve_alias(expr_str)
+        alias_resolved = self._resolve_alias(expr_str, visited=visited)
         if alias_resolved and alias_resolved != UNKNOWN:
             return alias_resolved
 
@@ -441,11 +444,16 @@ class FlinkTypeResolver:
             return "BOOLEAN"
         return None
 
-    def _resolve_alias(self, param):
+    def _resolve_alias(self, param, visited=None):
+        if visited is None:
+            visited = set()
+        if param in visited:
+            return None
+        visited.add(param)
         alias_param = re.sub(r"\[\d+\]$", "", param)
         if alias_param in self.alias_map:
             real_param = self.alias_map[alias_param]
-            return self.resolve_text_expr_type(real_param, None, 0)
+            return self.resolve_text_expr_type(real_param, None, 0, visited=visited)
         return None
 
     def _resolve_text_function_type(self, expr_str, input_schema, depth):

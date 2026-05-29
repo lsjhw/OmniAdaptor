@@ -1049,11 +1049,13 @@ class FlinkTypeResolver:
 
         return UNKNOWN
 
-    def resolve_text_expr_type(self, expr_str, input_schema, depth):
+    def resolve_text_expr_type(self, expr_str, input_schema, depth, visited=None):
         if not expr_str or not isinstance(expr_str, str):
             return UNKNOWN
 
-        # 去除首尾空白
+        if depth > 20:
+            return UNKNOWN
+
         expr_str = expr_str.strip()
         if not expr_str:
             return UNKNOWN
@@ -1093,8 +1095,7 @@ class FlinkTypeResolver:
                 if field.get("field_name", "").lower() == name_lower:
                     return field.get("field_type", UNKNOWN)
 
-        # 优先级8：别名解析
-        alias_resolved = self._resolve_alias(expr_str)
+        alias_resolved = self._resolve_alias(expr_str, visited=visited)
         if alias_resolved and alias_resolved != UNKNOWN:
             return alias_resolved
 
@@ -1160,36 +1161,18 @@ class FlinkTypeResolver:
 
         return None
 
-    def _resolve_alias(self, param):
-        """
-        解析别名引用
-
-        参数说明:
-        :param param: str，可能包含别名的表达式
-        :return: str 或 None，解析后的类型，无法解析返回 None
-
-        处理逻辑:
-        1. 移除数组索引后缀（如 alias[0] → alias）
-        2. 在 alias_map 中查找别名对应的原始表达式
-        3. 递归解析原始表达式的类型
-        4. 无法找到别名时返回 None
-
-        设计考量:
-        - 支持数组访问语法（如 col[0]）
-        - 别名映射由 extract_alias_map_from_description 方法构建
-
-        示例:
-        alias_map = {"a": "name"}
-        _resolve_alias("a") → VARCHAR（假设 name 是 VARCHAR 类型）
-        _resolve_alias("a[0]") → VARCHAR（移除索引后解析）
-        """
-        # 移除数组索引后缀（如 alias[0] → alias）
+    def _resolve_alias(self, param, visited=None):
+        if visited is None:
+            visited = set()
+        if param in visited:
+            return None
+        visited.add(param)
         alias_param = re.sub(r"\[\d+\]$", "", param)
 
         # 在别名映射中查找
         if alias_param in self.alias_map:
             real_param = self.alias_map[alias_param]
-            return self.resolve_text_expr_type(real_param, None, 0)
+            return self.resolve_text_expr_type(real_param, None, 0, visited=visited)
         return None
 
     def _resolve_text_function_type(self, expr_str, input_schema, depth):

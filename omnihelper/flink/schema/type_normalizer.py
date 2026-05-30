@@ -1,7 +1,50 @@
+"""
+   Flink 数据类型标准化模块
+
+   Copyright (c) Huawei Technologies Co., Ltd. 2026. All rights reserved.
+   You can use this software according to the terms and conditions of the Mulan PSL v2.
+   You may obtain a copy of Mulan PSL v2 at:
+            http://license.coscl.org.cn/MulanPSL2
+   THIS SOFTWARE IS PROVIDED ON AN "AS IS" BASIS, WITHOUT WARRANTIES OF ANY KIND,
+   EITHER EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO NON-INFRINGEMENT,
+   MERCHANTABILITY OR FIT FOR A PARTICULAR PURPOSE.
+   See the Mulan PSL v2 for more details.
+
+模块功能说明:
+    本模块提供 Flink 数据类型的标准化和解析功能，主要包括:
+    1. 类型别名映射 (如 STRING -> VARCHAR)
+    2. 类型标准化 (统一大小写和格式)
+    3. ROW/ARRAY/MAP 等嵌套类型的解析
+    4. 数值类型的优先级比较
+    5. 多类型场景下的公共类型推导
+
+类型别名映射表:
+    - STRING -> VARCHAR
+    - INTEGER -> INT
+    - LONG -> BIGINT
+    - REAL -> FLOAT
+    - 带 NOT NULL 后缀的类型 -> 去除后缀
+"""
+
 import re
 
 
 class TypeNormalizer:
+    """
+    Flink 数据类型标准化器
+
+    核心职责:
+    1. 统一不同格式的类型表示
+    2. 解析复杂嵌套类型的内部结构
+    3. 提供类型兼容性判断
+    4. 推导多类型的公共父类型
+
+    设计原则:
+    - 静态方法设计，无需实例化
+    - 返回标准化类型，便于比较和判断
+    - 支持嵌套类型的递归解析
+    """
+
     TYPE_ALIASES = {
         "STRING": "VARCHAR",
         "INTEGER": "INT",
@@ -41,6 +84,34 @@ class TypeNormalizer:
 
     @staticmethod
     def normalize_type(type_str):
+        """
+        标准化数据类型字符串
+
+        参数说明:
+        :param type_str: 原始类型字符串
+        :return: 标准化后的类型名称
+
+        标准化规则:
+        1. 空值返回 "unknown"
+        2. 去除首尾空白
+        3. ROW/ARRAY/MAP 等复杂类型直接返回
+        4. VARCHAR/CHAR 类型直接返回
+        5. TIMESTAMP_WITH_LOCAL_TIME_ZONE 转为 TIMESTAMP_LTZ
+        6. 其他类型查别名表，无匹配则返回大写形式
+
+        处理优先级 (按顺序):
+        1. 空值检查
+        2. ROW 类型检查
+        3. ARRAY 类型检查
+        4. MAP 类型检查
+        5. MULTISET 类型检查
+        6. DECIMAL 类型检查
+        7. VARCHAR 类型检查
+        8. CHAR 类型检查
+        9. TIMESTAMP_WITH_LOCAL_TIME_ZONE 检查
+        10. TIMESTAMP 类型检查
+        11. 别名表查找
+        """
         if not type_str:
             return "unknown"
 
@@ -78,11 +149,39 @@ class TypeNormalizer:
 
     @staticmethod
     def normalize_type_for_match(type_str):
+        """
+        用于匹配的类型标准化
+
+        参数说明:
+        :param type_str: 类型字符串
+        :return: 标准化后的类型
+
+        当前实现: 仅调用 normalize_type
+        预留接口支持未来扩展匹配逻辑
+        """
         normalized = TypeNormalizer.normalize_type(type_str)
         return normalized
 
     @staticmethod
     def parse_row_type(type_str):
+        """
+        解析 ROW 类型的内部字段结构
+
+        参数说明:
+        :param type_str: ROW 类型字符串，如 "ROW<name VARCHAR, age INT>"
+        :return: 字段信息列表，每个字段包含:
+            - field_name: 字段名
+            - field_type: 标准化后的字段类型
+            - original_type: 原始类型字符串
+            - nested_fields: 嵌套字段列表 (递归)
+
+        实现流程:
+        1. 检查空值和非 ROW 类型
+        2. 提取 <> 包围的内容
+        3. 分割字段列表 (逗号分隔，忽略括号内逗号)
+        4. 解析每个字段的名称和类型
+        5. 递归处理嵌套的 ROW/ARRAY/MAP 类型
+        """
         if not type_str:
             return []
 
@@ -98,6 +197,22 @@ class TypeNormalizer:
 
     @staticmethod
     def _extract_angle_brackets_content(type_str):
+        """
+        提取尖括号包围的内容
+
+        参数说明:
+        :param type_str: 包含尖括号的类型字符串
+        :return: 括号内容，不包含括号本身
+
+        实现算法:
+        1. 找到第一个 < 的位置
+        2. 使用深度计数器追踪嵌套
+        3. 当深度回到 0 时，定位匹配的 >
+        4. 返回 < 和 > 之间的内容
+
+        示例:
+        "ROW<name VARCHAR, age INT>" -> "name VARCHAR, age INT"
+        """
         start_idx = type_str.find("<")
         if start_idx == -1:
             return None
@@ -115,6 +230,20 @@ class TypeNormalizer:
 
     @staticmethod
     def _parse_row_fields(fields_str):
+        """
+        解析 ROW 类型的字段列表
+
+        参数说明:
+        :param fields_str: 字段列表字符串，如 "name VARCHAR, age INT"
+        :return: 字段信息字典列表
+
+        解析规则:
+        1. 使用 _split_row_fields 分割字段
+        2. 每字段格式: "字段名 类型" (空格分隔)
+        3. 使用正则提取字段名和类型
+        4. 标准化类型
+        5. 递归解析嵌套类型
+        """
         fields = []
         parts = TypeNormalizer._split_row_fields(fields_str)
 
@@ -144,6 +273,17 @@ class TypeNormalizer:
 
     @staticmethod
     def _split_row_fields(fields_str):
+        """
+        按逗号分割字段列表
+
+        参数说明:
+        :param fields_str: 字段列表字符串
+        :return: 分割后的字段字符串列表
+
+        关键处理:
+        - 忽略 <> 和 () 内的逗号
+        - 深度计数器确保正确匹配括号
+        """
         parts = []
         current = []
         depth = 0
@@ -168,6 +308,26 @@ class TypeNormalizer:
 
     @staticmethod
     def find_common_type(type1, type2):
+        """
+        查找两个类型的公共类型
+
+        参数说明:
+        :param type1: 第一个类型
+        :param type2: 第二个类型
+        :return: 公共类型，无法确定返回 None
+
+        类型兼容规则:
+        1. 相同类型直接返回
+        2. 任一为 unknown，返回 unknown
+        3. 标准化后相同，返回该类型
+        4. 数值类型: 返回优先级较高的
+        5. 字符串类型: 包含 VARCHAR/CHAR 则返回 VARCHAR
+        6. 日期时间类型: 返回精度较高的
+        7. BOOLEAN 与其他: 返回 VARCHAR
+
+        数值优先级 (从低到高):
+        TINYINT < SMALLINT < INT < BIGINT < FLOAT < DOUBLE < DECIMAL
+        """
         if not type1 or not type2:
             return None
 
@@ -207,6 +367,19 @@ class TypeNormalizer:
 
     @staticmethod
     def find_common_type_multi(types):
+        """
+        查找多个类型的公共类型
+
+        参数说明:
+        :param types: 类型列表
+        :return: 公共类型，无法确定返回 None
+
+        实现逻辑:
+        1. 空列表返回 None
+        2. 从第一个类型开始
+        3. 依次与后续类型调用 find_common_type
+        4. 任何一步返回 None，则整体返回 None
+        """
         if not types:
             return None
 
@@ -217,6 +390,40 @@ class TypeNormalizer:
                 return None
 
         return result
+
+    @staticmethod
+    def expand_row_type(type_str):
+        """
+        将 ROW 类型递归展开为嵌套字段的类型列表。
+        例如: ROW<id INT, name VARCHAR, addr ROW<city VARCHAR, zip INT>>
+        返回: ["INT", "VARCHAR", "VARCHAR", "INT"]
+        对于非 ROW 类型，返回包含标准化类型的列表。
+        """
+        if not type_str:
+            return ["unknown"]
+        type_str = type_str.strip()
+        if not type_str.upper().startswith("ROW"):
+            return [TypeNormalizer.normalize_type(type_str)]
+        inner = TypeNormalizer._extract_angle_brackets_content(type_str)
+        if not inner:
+            return ["ROW"]
+        parts = TypeNormalizer._split_row_fields(inner)
+        expanded = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            match = re.match(r"^(\w+)\s+(.+)$", part.strip())
+            if not match:
+                continue
+            field_type_str = match.group(2).strip()
+            # 递归展开嵌套的 ROW 类型
+            if field_type_str.upper().startswith("ROW"):
+                nested_expanded = TypeNormalizer.expand_row_type(field_type_str)
+                expanded.extend(nested_expanded)
+            else:
+                expanded.append(TypeNormalizer.normalize_type(field_type_str))
+        return expanded if expanded else ["ROW"]
 
     @staticmethod
     def expand_row_type(type_str):

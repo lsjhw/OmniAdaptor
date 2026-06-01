@@ -88,6 +88,10 @@ class FlinkFunctionParser:
         self.func_support_map = {}
         # 函数支持类型列表映射
         self.func_is_supported_types = {}
+        # CAST 函数支持的类型转换映射（白名单机制）
+        self.cast_is_support_type = {}
+        # 当前处理的规则（用于 CAST 函数检查）
+        self.current_rule = None
         # 加载配置并构建模式
         self.load_func_list()
 
@@ -157,6 +161,7 @@ class FlinkFunctionParser:
         self.omni_functions = []
         self.func_support_map = {}
         self.func_is_supported_types = {}
+        self.cast_is_support_type = {}
 
         # 遍历函数列表，构建映射关系
         for func in self.function_list:
@@ -170,6 +175,9 @@ class FlinkFunctionParser:
             self.func_support_map[func_name_lower] = func.get("is_support_func", False)
             # 构建支持类型列表映射
             self.func_is_supported_types[func_name_lower] = func.get("is_supported_type", [])
+            # 特殊处理 CAST 函数的类型转换映射（白名单机制）
+            if func_name_lower == "cast" and func.get("cast_is_support_type"):
+                self.cast_is_support_type = func.get("cast_is_support_type")
 
         # 构建正则匹配模式
         self.build_patterns()
@@ -236,7 +244,7 @@ class FlinkFunctionParser:
             elif len(func) <= 2 and not any(c.isalpha() for c in func):
                 operator_patterns.append(func)
                 continue  # 跳过后续判断
-            # 规则3: 在预定义关键字列表中
+            # 规则3: 在预定义关键字列表中（包括 AND/OR，需要单词边界保护）
             elif func.lower() in keyword_keywords:
                 is_keyword = True
 
@@ -276,11 +284,58 @@ class FlinkFunctionParser:
             sorted_ops = sorted(operator_patterns, key=len, reverse=True)
             escaped_ops = [re.escape(f) for f in sorted_ops]
             self.operator_pattern = re.compile(
-                r"({})".format("|".join(escaped_ops))
+                r"({})".format("|".join(escaped_ops)),
+                re.I
             )
             logger.info(f"Created operator pattern for {len(operator_patterns)} operators: {operator_patterns}")
         else:
             self.operator_pattern = None
+
+    def check_cast_function(self, input_type):
+        """
+        校验 CAST 函数的源类型和目标类型是否支持（白名单机制）
+
+        参数说明:
+        :param input_type: list，包含源类型和目标类型的列表，如 ["STRING", "INT"]
+
+        返回值说明:
+        :return: tuple，(is_supported, unsupported_types)
+            - is_supported: bool，表示是否支持该类型转换
+            - unsupported_types: list，不支持的类型列表，为空表示支持
+
+        检查逻辑:
+        1. 获取源类型和目标类型
+        2. 如果白名单为空，返回支持（无限制）
+        3. 检查源类型是否在白名单中
+        4. 如果源类型存在，检查目标类型是否在源类型的支持列表中
+        5. 不在白名单中的转换视为不支持
+
+        设计原理:
+        使用白名单机制，只有明确列出的类型转换才被支持。
+        与 omni 模块的黑名单机制相反，这里采用白名单策略。
+        """
+        if len(input_type) < 2:
+            return False, ["Invalid input type"]
+
+        source_type = input_type[0]
+        target_type = input_type[1]
+
+        # 白名单为空，视为支持所有转换
+        if not self.cast_is_support_type:
+            return True, []
+
+        # 检查源类型是否在白名单中
+        if source_type not in self.cast_is_support_type:
+            return False, [f"{source_type} -> {target_type} (source type not supported)"]
+
+        # 获取源类型支持的目标类型列表
+        supported_targets = self.cast_is_support_type.get(source_type, [])
+
+        # 检查目标类型是否在支持列表中
+        if target_type in supported_targets:
+            return True, []
+        else:
+            return False, [f"{source_type} -> {target_type} (target type not supported)"]
 
     def is_func_type_supported(self, func_name, param_types):
         """
@@ -331,10 +386,13 @@ class FlinkFunctionParser:
         # 规则4: 检查每个参数类型
         unsupported_found = []
         for param_type in (param_types or []):
-            # 类型归一化，消除格式差异
-            normalized = TypeNormalizer.normalize_type(param_type)
-            if normalized not in is_supported_list:
-                unsupported_found.append(normalized)
+            # 保留原始类型进行匹配，确保精度信息不丢失（如 TIMESTAMP(3)）
+            # 先尝试直接匹配原始类型
+            if param_type not in is_supported_list:
+                # 如果原始类型不匹配，尝试标准化后的类型（处理大小写差异）
+                normalized = TypeNormalizer.normalize_type(param_type)
+                if normalized not in is_supported_list:
+                    unsupported_found.append(param_type)
 
         # 规则5: 返回结果
         if unsupported_found:
@@ -413,6 +471,16 @@ class FlinkFunctionParser:
         if op == '*' and pos > 0 and description[pos - 1] == '(' and op_end < len(description) and description[op_end] == ')':
             return True
 
+        # 场景5: 检查操作符是否在字符串内部
+        # 例如: 'yyyy - MM-dd'、'a + b'、'x = y' 等中的操作符不应该被匹配
+        quote_count = 0
+        for i in range(pos):
+            if description[i] in ("'", '"'):
+                quote_count += 1
+        # 在循环结束后检查引号计数是否为奇数（奇数表示在引号内）
+        if quote_count % 2 == 1:
+            return True
+
         # 非误报
         return False
 
@@ -446,6 +514,39 @@ class FlinkFunctionParser:
         # 匹配 "[数字]:字母" 模式
         op_pattern = re.compile(r'\[\d+\]:[A-Za-z]*$')
         return bool(op_pattern.search(prev_part))
+
+    def _is_inside_sarg(self, description, pos):
+        """
+        判断指定位置是否在 Sarg[...] 内部
+
+        参数说明:
+        :param description: str，描述文本
+        :param pos: int，要检查的位置
+        :return: bool，True 表示在 Sarg[...] 内部，False 表示不在
+
+        实现原理:
+        使用栈计数方式，统计从字符串开头到指定位置的 Sarg[ 和 ] 的数量
+        如果 Sarg[ 的数量大于 ] 的数量，说明位置在 Sarg[...] 内部
+
+        使用场景:
+        - SEARCH 函数的参数中包含 Sarg 对象，如 SEARCH(person.state, Sarg[_UTF-16LE'CA', ...])
+        - 需要跳过 Sarg[] 内部的内容，避免误匹配其中的操作符和函数
+        """
+        sarg_count = 0
+        i = 0
+        while i < pos:
+            # 检查是否是 Sarg[
+            if i + 4 <= len(description) and description[i:i+4].upper() == 'SARG':
+                if i + 5 <= len(description) and description[i+4] == '[':
+                    sarg_count += 1
+                    i += 5
+                    continue
+            # 检查是否是 ]
+            if description[i] == ']':
+                sarg_count -= 1
+            i += 1
+        # 如果 sarg_count > 0，说明在 Sarg[...] 内部
+        return sarg_count > 0
 
     def parse_plan_description(self, description):
         """
@@ -485,11 +586,18 @@ class FlinkFunctionParser:
                 # 过滤算子标识行中的误匹配
                 if self._is_operator_form(description, match_start):
                     continue
+                # 跳过 Sarg[] 内部的内容
+                if self._is_inside_sarg(description, match_start):
+                    continue
                 funcs.append({"func": func_name, "params": [], "type": "func"})
 
         # 步骤2: 匹配关键字形式
         if self.keywords_pattern:
             for match in self.keywords_pattern.finditer(description):
+                match_start = match.start()
+                # 跳过 Sarg[] 内部的内容
+                if self._is_inside_sarg(description, match_start):
+                    continue
                 keyword = match.group(1).lower()
                 funcs.append({"func": keyword, "params": [], "type": "keyword"})
 
@@ -499,8 +607,15 @@ class FlinkFunctionParser:
             clean_desc = self._strip_html_tags(description)
             for match in self.operator_pattern.finditer(clean_desc):
                 op = match.group(1).lower()
+                match_start = match.start()
                 # 过滤误报场景
                 if self._is_operator_false_positive(op, match, clean_desc):
+                    continue
+                # 跳过 Sarg[] 内部的内容（使用清理后的文本进行检查）
+                if self._is_inside_sarg(clean_desc, match_start):
+                    continue
+                # 额外检查：如果操作符前面是字母、数字或下划线，跳过（避免匹配 _UTF-16LE 中的 -）
+                if match_start > 0 and (clean_desc[match_start - 1].isalnum() or clean_desc[match_start - 1] == '_'):
                     continue
                 funcs.append({"func": op, "params": [], "type": "operator"})
 
@@ -512,11 +627,12 @@ class FlinkFunctionParser:
 
         参数说明:
         :param description: str，算子描述字符串
-        :param param_types_map: dict 或 None，函数名→参数类型列表的映射
-                               如 {"upper": ["VARCHAR"], "cast": ["INT", "VARCHAR"]}
+        :param param_types_map: dict 或 None，{(函数名, 表达式): [参数类型列表]} 或 {函数名: [参数类型列表]}
+                               如 {("upper", "upper(name)"): ["VARCHAR"], ("cast", "cast(a AS INT)"): ["INT", "VARCHAR"]}
         :return: list，不支持的函数列表，每项包含:
             - func_name: str，函数名称 (小写)
             - times: int，出现次数
+            - expression: str，完整表达式（当可用时）
             - unsupported_types: list，(可选) 不支持的类型列表
 
         分析规则(优先级):
@@ -529,9 +645,9 @@ class FlinkFunctionParser:
            - 未提供参数类型: 视为支持，不计入
 
         计数策略:
-        - 使用 (函数名, 参数类型元组) 作为计数器的键
-        - 相同函数不同参数类型视为不同条目
-        - 例如: upper(VARCHAR) 和 upper(INT) 分别计数
+        - 使用 (函数名, 表达式, 参数类型元组) 作为计数器的键
+        - 相同函数不同参数类型、不同表达式视为不同条目
+        - 例如: count(distinct bidder) 和 count(distinct bid) 分别计数
 
         调试支持:
         - 收集所有匹配结果用于日志输出
@@ -540,9 +656,9 @@ class FlinkFunctionParser:
         if not description:
             return []
 
-        # 计数器: {(func_name, types_tuple): count}
+        # 计数器: {(func_name, expression, types_tuple): count}
         func_counter = {}
-        # 记录不支持的类型: {(func_name, types_tuple): [unsupported_types]}
+        # 记录不支持的类型: {(func_name, expression, types_tuple): [unsupported_types]}
         func_unsupported_types = {}
 
         # 调试用: 收集所有匹配结果
@@ -555,7 +671,11 @@ class FlinkFunctionParser:
             for match in self.func_pattern.finditer(description):
                 func_name = match.group(1).lower()
                 match_start = match.start()
+                # 跳过算子标识行中的误匹配
                 if self._is_operator_form(description, match_start):
+                    continue
+                # 跳过 Sarg[] 内部的内容
+                if self._is_inside_sarg(description, match_start):
                     continue
                 all_func_matches.append(match)
                 # 检查支持性并更新计数器
@@ -566,6 +686,10 @@ class FlinkFunctionParser:
         # 步骤2: 匹配关键字
         if self.keywords_pattern:
             for match in self.keywords_pattern.finditer(description):
+                match_start = match.start()
+                # 跳过 Sarg[] 内部的内容
+                if self._is_inside_sarg(description, match_start):
+                    continue
                 all_keyword_matches.append(match)
                 keyword = match.group(1).lower()
                 self._check_func_support(
@@ -577,12 +701,20 @@ class FlinkFunctionParser:
         if self.operator_pattern:
             for match in self.operator_pattern.finditer(clean_desc):
                 op = match.group(1).lower()
+                match_start = match.start()
+                # 跳过误报场景
                 if self._is_operator_false_positive(op, match, clean_desc):
                     continue
-                all_operator_matches.append(match)
+                # 跳过 Sarg[] 内部的内容
+                if self._is_inside_sarg(clean_desc, match_start):
+                    continue
+                # 额外检查：如果操作符前面是字母、数字或下划线，跳过（避免匹配 _UTF-16LE 中的 -）
+                if match_start > 0 and (clean_desc[match_start - 1].isalnum() or clean_desc[match_start - 1] == '_'):
+                    continue
                 self._check_func_support(
                     op, func_counter, func_unsupported_types, param_types_map
                 )
+                all_operator_matches.append(match)
 
         # 调试日志: 输出所有匹配的函数
         all_matches = all_func_matches + all_keyword_matches + all_operator_matches
@@ -615,40 +747,60 @@ class FlinkFunctionParser:
         :param func_name: str，函数名 (小写)
         :param func_counter: dict，函数出现次数计数器，键格式为 (函数名, 参数类型元组)
         :param func_unsupported_types: dict，函数不支持类型记录
-        :param param_types_map: dict，函数名→参数类型列表的映射
+        :param param_types_map: dict，{(函数名, 表达式): [参数类型列表]} 或 {函数名: [参数类型列表]}
 
         内部逻辑(顺序执行):
         1. 函数不在支持映射中: 直接返回
            - 原因: 无法判断支持性，跳过
-        2. 获取函数参数类型，构建计数器键
+        2. 特殊处理 CAST 函数：使用白名单机制检查类型转换
+        3. 获取函数参数类型，构建计数器键
            - 如果提供了 param_types_map，获取对应参数类型
+           - 支持两种格式的键: (func_name, expression) 和 func_name
            - 否则使用空元组作为类型标识
-        3. is_support_func=False: 计数器+1，返回
+        4. is_support_func=False: 计数器+1，返回
            - 原因: 函数本身不被支持
-        4. 获取支持类型列表，为空则视为支持，返回
+        5. 获取支持类型列表，为空则视为支持，返回
            - 原因: 无类型限制的函数默认支持
-        5. 调用 is_func_type_supported 检查类型支持情况
+        6. 调用 is_func_type_supported 检查类型支持情况
            - 如果不支持，更新计数器和不支持类型记录
 
         计数器键设计:
         - 使用 (func_name, types_tuple) 作为键
         - types_tuple = tuple(param_types) 或 ()
-        - 这样可以区分同一函数不同参数类型的情况
+        - 这样可以区分同一函数不同参数类型的情况，times 是该函数名出现的总次数
         """
         # 规则1: 函数不在支持映射中
         if func_name not in self.func_support_map:
             return
 
-        # 获取参数类型
+        # 从 param_types_map 获取参数类型（支持两种格式的键）
         param_types = None
         if param_types_map:
-            param_types = param_types_map.get(func_name)
+            # 首先尝试使用 (func_name, expr) 格式的键
+            for key in param_types_map:
+                if isinstance(key, tuple) and len(key) >= 2 and key[0] == func_name:
+                    param_types = param_types_map[key]
+                    break
+            # 如果没找到，尝试使用旧格式的键
+            if param_types is None:
+                param_types = param_types_map.get(func_name)
+
+        # 规则2: 特殊处理 CAST 函数（使用白名单机制）
+        if func_name == "cast" and self.cast_is_support_type:
+            if param_types:
+                is_supported, unsupported = self.check_cast_function(param_types)
+                if not is_supported:
+                    types_key = tuple(param_types)
+                    counter_key = (func_name, types_key)
+                    func_counter[counter_key] = func_counter.get(counter_key, 0) + 1
+                    func_unsupported_types[counter_key] = unsupported
+            return
 
         # 构建计数器键: (函数名, 参数类型元组)
         types_key = tuple(param_types) if param_types else ()
         counter_key = (func_name, types_key)
 
-        # 规则2: 函数本身不被支持
+        # 规则3: 函数本身不被支持
         if not self.func_support_map[func_name]:
             func_counter[counter_key] = func_counter.get(counter_key, 0) + 1
             return
@@ -656,12 +808,12 @@ class FlinkFunctionParser:
         # 获取支持类型列表
         is_supported_list = self.func_is_supported_types.get(func_name, [])
 
-        # 规则3: 无类型限制
+        # 规则4: 无类型限制
         if not is_supported_list:
             logger.debug(f"函数 '{func_name}' 被过滤（is_support_func=True，无类型限制）")
             return
 
-        # 规则4: 有类型限制，检查参数类型
+        # 规则5: 有类型限制，检查参数类型
         if param_types:
             is_supported, unsupported = self.is_func_type_supported(func_name, param_types)
             if is_supported:

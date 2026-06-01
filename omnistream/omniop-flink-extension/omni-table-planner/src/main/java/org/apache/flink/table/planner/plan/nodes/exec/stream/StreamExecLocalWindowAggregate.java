@@ -255,6 +255,7 @@ public class StreamExecLocalWindowAggregate extends StreamExecWindowAggregateBas
         } else {
             throw new UnsupportedOperationException(windowSpec + " is not supported yet.");
         }
+        jsonMap.put("shiftTimeZone", shiftTimeZone.toString());
     }
 
 

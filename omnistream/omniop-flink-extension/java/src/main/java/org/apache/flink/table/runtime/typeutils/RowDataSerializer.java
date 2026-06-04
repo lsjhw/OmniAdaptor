@@ -18,6 +18,7 @@
 
 package org.apache.flink.table.runtime.typeutils;
 
+import com.huawei.omniruntime.flink.runtime.api.state.serializer.consts.SC;
 import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.typeutils.*;
 import org.apache.flink.api.java.typeutils.runtime.DataInputViewStream;
@@ -38,6 +39,8 @@ import org.apache.flink.util.InstantiationUtil;
 
 import java.io.IOException;
 import java.util.Arrays;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -81,9 +84,11 @@ public class RowDataSerializer extends AbstractRowDataSerializer<RowData> {
     }
 
     public RowType getRowType() {
-        return new RowType(Arrays.stream(types)
-                .map(type-> new RowType.RowField(type.getTypeRoot().name(), type, ""))
-                .collect(Collectors.toList()));
+        AtomicInteger i = new AtomicInteger();
+        List<RowType.RowField> fields = Arrays.stream(types)
+            .map(type-> new RowType.RowField("f" + i.getAndIncrement(), type, SC.EMPTY))
+            .collect(Collectors.toList());
+        return new RowType(fields);
     }
 
     @Override

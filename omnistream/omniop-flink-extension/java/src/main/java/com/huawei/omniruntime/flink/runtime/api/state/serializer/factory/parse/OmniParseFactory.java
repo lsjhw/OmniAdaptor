@@ -5,6 +5,7 @@ import com.huawei.omniruntime.flink.runtime.api.state.serializer.consts.SC;
 import com.huawei.omniruntime.flink.runtime.api.state.serializer.consts.enums.OmniSerializerType;
 import com.huawei.omniruntime.flink.runtime.api.state.serializer.model.info.OmniNativeSerializerJsonInfo;
 import com.huawei.omniruntime.flink.runtime.api.state.serializer.model.info.OmniSerializerJsonInfo;
+import com.huawei.omniruntime.flink.runtime.api.state.serializer.model.info.type.BinaryTypeInfo;
 import com.huawei.omniruntime.flink.runtime.api.state.serializer.model.info.type.TimerTypeInfo;
 import com.huawei.omniruntime.flink.runtime.metrics.exception.GeneralRuntimeException;
 import com.huawei.omniruntime.flink.utils.ReflectionUtils;
@@ -24,19 +25,24 @@ import org.apache.flink.api.java.typeutils.runtime.PojoSerializer;
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializer;
 import org.apache.flink.runtime.state.VoidNamespaceTypeInfo;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonGenerator;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonParser;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.flink.streaming.api.operators.TimerSerializer;
+import org.apache.flink.table.data.binary.BinaryRowData;
 import org.apache.flink.table.gateway.rest.serde.LogicalTypeJsonDeserializer;
 import org.apache.flink.table.gateway.rest.serde.LogicalTypeJsonSerializer;
+import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
 import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.util.CollectionUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.StringWriter;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /**
@@ -80,6 +86,7 @@ public abstract class OmniParseFactory {
                 case VOID_NAMESPACE:
                 case TIMER:
                 case ROW:
+                case BINARY_ROW:
                     factory = new OmniParseValueFactory();
                     break;
                 case UNKNOW:
@@ -151,13 +158,17 @@ public abstract class OmniParseFactory {
             return new TimerTypeInfo<>(keyTypeInfo, namespaceTypeInfo);
         } else if (OmniSerializerType.ROW.equals(info.getSerializerType())) {
             try {
+                JsonParser logicalTypeParser = info.getLogicalType();
                 LogicalTypeJsonDeserializer deserializer = new LogicalTypeJsonDeserializer();
-                RowType rowType = (RowType) deserializer.deserialize(info.getLogicalType(), null);
+                RowType rowType = (RowType) deserializer.deserialize(logicalTypeParser, null);
                 return InternalTypeInfo.of(rowType);
             } catch (Exception e) {
                 LOG.error("method : buildTypeInformationBy -> build row exception", e);
                 throw new GeneralRuntimeException(e);
             }
+        } else if (OmniSerializerType.BINARY_ROW.equals(info.getSerializerType())) {
+            int arity = CollectionUtil.isNullOrEmpty(info.getFieldNames()) ? 0 : info.getFieldNames().size();
+            return BinaryTypeInfo.of(new BinaryRowData(arity), info.getFieldNames());
         }
 
         return null;
@@ -287,6 +298,17 @@ public abstract class OmniParseFactory {
                 LOG.error("method : buildJsonInfoBy -> build row exception", e);
                 throw new GeneralRuntimeException(e);
             }
+        } else if (OmniSerializerType.BINARY_ROW.equals(serializerType)) {
+            BinaryRowDataSerializer binaryRowDataSerializer = (BinaryRowDataSerializer) typeSerializer;
+            List<String> inputTypes = binaryRowDataSerializer.getInputTypes();
+            if (!CollectionUtil.isNullOrEmpty(inputTypes)) {
+                jsonInfo.setFields(inputTypes);
+            } else {
+                // just for arity
+                int arity = binaryRowDataSerializer.getArity() > 0 ? binaryRowDataSerializer.getArity() : 0;
+                jsonInfo.setFields(Collections.nCopies(arity, SC.EMPTY));
+            }
+            return jsonInfo;
         }
 
         return null;

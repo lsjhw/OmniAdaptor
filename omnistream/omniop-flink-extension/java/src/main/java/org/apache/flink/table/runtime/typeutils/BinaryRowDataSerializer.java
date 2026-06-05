@@ -37,6 +37,7 @@ import org.apache.flink.util.CollectionUtil;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
+import java.util.Locale;
 
 import static org.apache.flink.util.Preconditions.checkArgument;
 
@@ -244,7 +245,7 @@ public class BinaryRowDataSerializer extends AbstractRowDataSerializer<BinaryRow
         checkArgument(headerLessView.getHeaderLength() == 0);
         if (length < 0) {
             throw new IOException(
-                    String.format(
+                    String.format(Locale.ROOT,
                             "Read unexpected bytes in source of positionInSegment[%d] and limitInSegment[%d]",
                             headerLessView.getCurrentPositionInSegment(),
                             headerLessView.getCurrentSegmentLimit()));

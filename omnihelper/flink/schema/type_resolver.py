@@ -1674,6 +1674,58 @@ class FlinkTypeResolver:
 
         return items
 
+    def _find_all_select_clauses(self, text):
+        """
+        查找所有 select=[...] 子句（处理嵌套括号）
+        
+        参数说明:
+        :param text: str，包含 select=[] 的文本
+        :return: list，所有 select 子句的内容列表（不含 select=[] 括号）
+        
+        解析逻辑:
+        1. 遍历字符串，查找 "select=[" 模式
+        2. 找到后使用深度计数器跟踪括号嵌套
+        3. 遇到左括号增加深度，遇到右括号减少深度
+        4. 深度为 0 且遇到 "]" 时，表示一个 select 子句结束
+        5. 提取 select=[...] 内部的内容
+        
+        示例:
+        "Calc(select=[id, name]) Calc(select=[a, b])" → ["id, name", "a, b"]
+        """
+        clauses = []
+        i = 0
+        text_len = len(text)
+        
+        while i < text_len:
+            # 查找 "select=[" 模式（不区分大小写）
+            if text[i:i+8].lower() == "select=[" and i + 8 < text_len:
+                start = i + 8  # 跳过 "select=["
+                depth = 0
+                current_clause = []
+                j = start
+                
+                while j < text_len:
+                    char = text[j]
+                    if char == "[":
+                        depth += 1
+                        current_clause.append(char)
+                    elif char == "]":
+                        if depth == 0:
+                            # 找到匹配的结束括号
+                            clauses.append("".join(current_clause))
+                            break
+                        else:
+                            depth -= 1
+                            current_clause.append(char)
+                    else:
+                        current_clause.append(char)
+                    j += 1
+                i = j + 1  # 跳过当前的 "]"
+            else:
+                i += 1
+        
+        return clauses
+
     def extract_alias_map_from_description(self, description_data):
         """
         从描述中提取别名映射
@@ -1739,7 +1791,8 @@ class FlinkTypeResolver:
         self.update_alias_map(alias_map)
         return alias_map
 
-    def _extract_table_name_from_origin(self, origin_desc):
+    @staticmethod
+    def _extract_table_name_from_origin(origin_desc):
         """
         从 originDescription 提取表名
 
@@ -1846,7 +1899,7 @@ class FlinkTypeResolver:
         - fields=[field1, field2, field3, ...]
 
         解析流程:
-        1. 使用正则表达式提取 fields=[...] 中的内容
+        1. 查找所有 fields=[...] 子句（处理嵌套括号）
         2. 按逗号分割字段名
         3. 为每个字段名解析类型（使用 _resolve_field_type_by_name）
         4. 返回字段信息列表
@@ -1858,26 +1911,74 @@ class FlinkTypeResolver:
         if not desc:
             return []
 
-        # 提取 fields=[...] 中的内容
-        fields_match = re.search(r'fields=\[([^\]]+)\]', desc)
-        if not fields_match:
-            return []
-
-        # 按逗号分割字段名
-        fields_str = fields_match.group(1)
-        field_names = [f.strip() for f in fields_str.split(',') if f.strip()]
-        if not field_names:
+        # 查找所有 fields=[...] 子句（处理嵌套括号）
+        fields_clauses = self._find_all_fields_clauses(desc)
+        if not fields_clauses:
             return []
 
         # 为每个字段名解析类型
         result = []
-        for name in field_names:
-            field_type = self._resolve_field_type_by_name(name)
-            result.append({
-                "field_name": name,
-                "field_type": field_type,
-            })
+        for fields_str in fields_clauses:
+            field_names = [f.strip() for f in fields_str.split(',') if f.strip()]
+            for name in field_names:
+                field_type = self._resolve_field_type_by_name(name)
+                result.append({
+                    "field_name": name,
+                    "field_type": field_type,
+                })
         return result
+
+    def _find_all_fields_clauses(self, text):
+        """
+        查找所有 fields=[...] 子句（处理嵌套括号）
+        
+        参数说明:
+        :param text: str，包含 fields=[] 的文本
+        :return: list，所有 fields 子句的内容列表（不含 fields=[] 括号）
+        
+        解析逻辑:
+        1. 遍历字符串，查找 "fields=[" 模式
+        2. 找到后使用深度计数器跟踪括号嵌套
+        3. 遇到左括号增加深度，遇到右括号减少深度
+        4. 深度为 0 且遇到 "]" 时，表示一个 fields 子句结束
+        5. 提取 fields=[...] 内部的内容
+        
+        示例:
+        "Scan(fields=[id, name]) Filter(fields=[a, b])" → ["id, name", "a, b"]
+        """
+        clauses = []
+        i = 0
+        text_len = len(text)
+        
+        while i < text_len:
+            # 查找 "fields=[" 模式（不区分大小写）
+            if text[i:i+8].lower() == "fields=[" and i + 8 < text_len:
+                start = i + 8  # 跳过 "fields=["
+                depth = 0
+                current_clause = []
+                j = start
+                
+                while j < text_len:
+                    char = text[j]
+                    if char == "[":
+                        depth += 1
+                        current_clause.append(char)
+                    elif char == "]":
+                        if depth == 0:
+                            # 找到匹配的结束括号
+                            clauses.append("".join(current_clause))
+                            break
+                        else:
+                            depth -= 1
+                            current_clause.append(char)
+                    else:
+                        current_clause.append(char)
+                    j += 1
+                i = j + 1  # 跳过当前的 "]"
+            else:
+                i += 1
+        
+        return clauses
 
     def _resolve_field_type_by_name(self, field_name):
         """
@@ -2166,11 +2267,13 @@ class FlinkTypeResolver:
 
         # ===== Calc 算子：从 select=[...] 提取 =====
         if op_type == "Calc":
+            output_schema = []
             for desc in description_data:
                 if isinstance(desc, str):
-                    select_match = re.search(r'select=\[(.*?)\]', desc, re.I)
-                    if select_match:
-                        return self._build_calc_output_from_text(select_match.group(1), input_schema)
+                    select_matches = self._find_all_select_clauses(desc)
+                    for select_str in select_matches:
+                        output_schema.extend(self._build_calc_output_from_text(select_str, input_schema))
+            return output_schema if output_schema else list(input_schema or [])
 
         # ===== GroupAggregate 算子：从 groupBy=[...] 提取 =====
         if op_type == "GroupAggregate":

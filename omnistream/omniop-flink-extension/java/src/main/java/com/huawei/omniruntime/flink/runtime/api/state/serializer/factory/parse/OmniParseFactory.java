@@ -7,6 +7,7 @@ import com.huawei.omniruntime.flink.runtime.api.state.serializer.model.info.Omni
 import com.huawei.omniruntime.flink.runtime.api.state.serializer.model.info.OmniSerializerJsonInfo;
 import com.huawei.omniruntime.flink.runtime.api.state.serializer.model.info.type.BinaryTypeInfo;
 import com.huawei.omniruntime.flink.runtime.api.state.serializer.model.info.type.TimerTypeInfo;
+import com.huawei.omniruntime.flink.runtime.api.state.serializer.utils.OmniStateSerializerUtils;
 import com.huawei.omniruntime.flink.runtime.metrics.exception.GeneralRuntimeException;
 import com.huawei.omniruntime.flink.utils.ReflectionUtils;
 import org.apache.commons.lang3.StringUtils;
@@ -34,6 +35,7 @@ import org.apache.flink.table.gateway.rest.serde.LogicalTypeJsonSerializer;
 import org.apache.flink.table.runtime.typeutils.BinaryRowDataSerializer;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.runtime.typeutils.RowDataSerializer;
+import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.util.CollectionUtil;
 import org.slf4j.Logger;
@@ -55,6 +57,7 @@ public abstract class OmniParseFactory {
 
     public static final String TYPE_SERIALIZER_PRIVATE_KEY_CLAZZ = "clazz";
     public static final String TYPE_SERIALIZER_PRIVATE_KEY_FIELDS = "fields";
+    public static final String TYPE_SERIALIZER_PRIVATE_KEY_TYPES = "types";
     public static final String TYPE_SERIALIZER_PRIVATE_KEY_FIELD_SERIALIZERS = "fieldSerializers";
 
     // recursion depth max
@@ -281,7 +284,8 @@ public abstract class OmniParseFactory {
         } else if (OmniSerializerType.ROW.equals(serializerType)) {
             try {
                 RowDataSerializer rowDataSerializer = (RowDataSerializer) typeSerializer;
-                RowType rowType = rowDataSerializer.getRowType();
+                LogicalType[] types = ReflectionUtils.retrievePrivateField(rowDataSerializer, TYPE_SERIALIZER_PRIVATE_KEY_TYPES);
+                RowType rowType = OmniStateSerializerUtils.getRowType(types);
 
                 LogicalTypeJsonSerializer serializer = new LogicalTypeJsonSerializer();
                 StringWriter stringWriter = new StringWriter();

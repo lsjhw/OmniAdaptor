@@ -689,8 +689,8 @@ class FlinkParser:
             ExcelColumns.OUTPUT: op.get("output_types_str", ""),
             ExcelColumns.FREQUENCY: op["count"],
             ExcelColumns.RUNTIME: op["run_time"] if task_status else "",
-            ExcelColumns.INPUT_DATA_SIZE: f"{FlinkParser.bytes_to_mb(op['num_in'])}MB" if task_status else "",
-            ExcelColumns.OUTPUT_DATA_SIZE: f"{FlinkParser.bytes_to_mb(op['num_out'])}MB" if task_status else "",
+            ExcelColumns.INPUT_DATA_SIZE: f"{FlinkParser.bytes_to_mb(op['num_in'])}" if task_status else "",
+            ExcelColumns.OUTPUT_DATA_SIZE: f"{FlinkParser.bytes_to_mb(op['num_out'])}" if task_status else "",
             ExcelColumns.FUNC_NAME: func_name,
             ExcelColumns.FUNC_INPUT: func_inputs_str,
             ExcelColumns.NESTED_CONTENT: func_nested,
@@ -751,17 +751,98 @@ class FlinkParser:
         :return: bool，True 表示是操作符
 
         判断标准:
-        - 长度 <= 2
-        - 不包含字母
+        - 长度 <= 2 且不包含字母，或者是 AND/OR 逻辑操作符
 
-        典型操作符: =, <, >, <=, >=, <>, !=, +, -, *, /, %
+        典型操作符: =, <, >, <=, >=, <>, !=, +, -, *, /, %, AND, OR
         """
         if not func_name:
             return False
+        # 逻辑操作符 AND/OR
+        if func_name.upper() in ('AND', 'OR'):
+            return True
+        # 其他操作符：长度 <= 2 且不包含字母
         return len(func_name) <= 2 and not any(c.isalpha() for c in func_name)
 
     @staticmethod
-    def _extract_operator_operands_from_desc(func_name, description):
+    def _is_inside_quotes(text, pos):
+        """
+        判断指定位置是否在引号内
+
+        参数说明:
+        :param text: str，完整文本
+        :param pos: int，位置索引
+        :return: bool，True 表示在引号内
+
+        判断逻辑:
+        - 统计位置之前的单引号和双引号数量
+        - 如果单引号或双引号数量为奇数，说明在引号内
+        """
+        if pos < 0 or pos >= len(text):
+            return False
+        
+        before_text = text[:pos]
+        # 统计单引号和双引号数量（不考虑转义）
+        single_quotes = before_text.count("'")
+        double_quotes = before_text.count('"')
+        
+        # 如果单引号或双引号数量为奇数，说明在引号内
+        return single_quotes % 2 == 1 or double_quotes % 2 == 1
+
+    def _is_inside_sarg(text, pos):
+        """
+        判断指定位置是否在 Sarg[...] 内部
+
+        参数说明:
+        :param text: str，完整文本
+        :param pos: int，位置索引
+        :return: bool，True 表示在 Sarg[...] 内部
+
+        判断逻辑:
+        - 使用栈计数方式，统计从字符串开头到指定位置的 Sarg[ 和 ] 的数量
+        - 如果 Sarg[ 的数量大于 ] 的数量，说明位置在 Sarg[...] 内部
+        """
+        if pos < 0 or pos >= len(text):
+            return False
+        
+        sarg_count = 0
+        i = 0
+        while i < pos:
+            if i + 4 <= len(text) and text[i:i+4].upper() == 'SARG':
+                if i + 5 <= len(text) and text[i+4] == '[':
+                    sarg_count += 1
+                    i += 5
+                    continue
+            if text[i] == ']':
+                sarg_count -= 1
+            i += 1
+        return sarg_count > 0
+
+    @staticmethod
+    def _is_prefix_type_func(func_name):
+        """
+        判断函数名是否为前缀类型函数（无括号格式）
+
+        参数说明:
+        :param func_name: str，函数名
+        :return: bool，True 表示是前缀类型函数
+
+        判断标准:
+        - 函数名为 TIMESTAMP, INTERVAL, DATE, TIME, ROW 等
+        - 这些函数的调用格式是 "FUNC 'value'" 而不是 "FUNC(...)"
+
+        典型格式:
+        - TIMESTAMP '2024-01-01 12:00:00'
+        - INTERVAL '5' DAY
+        - DATE '2024-01-01'
+        - TIME '12:00:00'
+        """
+        if not func_name:
+            return False
+        prefix_types = {"TIMESTAMP", "INTERVAL", "DATE", "TIME", "ROW"}
+        return func_name.upper() in prefix_types
+
+    @staticmethod
+    def _extract_operator_operands_from_desc(func_name, description , start_pos=None):
         """
         从描述中提取操作符的左右操作数
 
@@ -792,9 +873,17 @@ class FlinkParser:
             return None, None
         # 清理 HTML 标签
         clean_desc = re.sub(r'<[^>]+>[\s:*\+\-]*', ' ', description)
-        op_pattern = re.compile(re.escape(func_name))
+        # 使用不区分大小写匹配
+        is_logical_op = func_name.upper() in ('AND', 'OR')
+        if is_logical_op:
+            op_pattern = re.compile(r'\b' + re.escape(func_name) + r'\b', re.I)
+        else:
+            op_pattern = re.compile(re.escape(func_name), re.I)
         for match in op_pattern.finditer(clean_desc):
             pos = match.start()
+            #如果指定start_pos，跳过该位置之前的匹配
+            if start_pos and pos < start_pos:
+                continue
             op_end = match.end()
             # 误报过滤
             if func_name == '=' and op_end < len(clean_desc) and clean_desc[op_end] == '[':
@@ -808,10 +897,17 @@ class FlinkParser:
             if func_name == '*' and pos > 0 and clean_desc[pos - 1] == '(' and op_end < len(clean_desc) and clean_desc[
                 op_end] == ')':
                 continue
-
+            # 过滤引号内的操作符（字符串字面量中的 AND/OR）
+            if FlinkParser._is_inside_quotes(clean_desc, pos):
+                continue
+            # 跳过 Sarg[] 内部的内容
+            if FlinkParser._is_inside_sarg(clean_desc, pos):
+                continue
             # 向左查找左操作数起点
             left_start = pos - 1
             depth = 0
+            # 逻辑操作符（AND、OR）不需要在遇到 = 时停止
+            is_logical_op = func_name.upper() in ('AND', 'OR')
             while left_start >= 0:
                 ch = clean_desc[left_start]
                 if ch in (')', ']', '}'):
@@ -821,7 +917,7 @@ class FlinkParser:
                         left_start += 1
                         break
                     depth -= 1
-                elif depth == 0 and ch == '=':
+                elif depth == 0 and ch == '=' and not is_logical_op:
                     if left_start + 1 < len(clean_desc) and clean_desc[left_start + 1] == '[':
                         depth += 1
                         left_start -= 1
@@ -831,6 +927,15 @@ class FlinkParser:
                 elif depth == 0 and ch == ',':
                     left_start += 1
                     break
+                # 遇到 AND/OR 应该停止（逻辑操作符也需要停止，避免提取过多）
+                elif depth == 0:
+                    # 检查是否遇到 AND 或 OR
+                    if left_start >= 2 and clean_desc[left_start-2:left_start+1].upper() == 'AND':
+                        left_start += 1
+                        break
+                    if left_start >= 1 and clean_desc[left_start-1:left_start+1].upper() == 'OR':
+                        left_start += 1
+                        break
                 left_start -= 1
             else:
                 left_start = 0
@@ -850,6 +955,13 @@ class FlinkParser:
                     depth -= 1
                 elif depth == 0 and ch in (',', ')', ']'):
                     break
+                # 遇到 AND/OR 应该停止（逻辑操作符也需要停止，避免提取过多）
+                elif depth == 0:
+                    # 检查是否遇到 AND 或 OR
+                    if right_end + 3 <= len(clean_desc) and clean_desc[right_end:right_end+3].upper() == 'AND':
+                        break
+                    if right_end + 2 <= len(clean_desc) and clean_desc[right_end:right_end+2].upper() == 'OR':
+                        break
                 right_end += 1
 
             left_expr = clean_desc[left_start:pos].strip()
@@ -870,8 +982,9 @@ class FlinkParser:
 
         实现逻辑:
         1. 操作符类型调用 _extract_operator_operands_from_desc，返回 "left,right" 格式
-        2. 函数类型使用正则匹配函数调用 func_name(
-        3. 解析括号匹配，提取括号内的参数
+        2. 前缀类型函数（TIMESTAMP, INTERVAL等）提取后面的内容作为参数
+        3. 函数类型使用正则匹配函数调用 func_name(
+        4. 解析括号匹配，提取括号内的参数
 
         括号匹配算法:
         - 使用深度计数器追踪嵌套
@@ -891,6 +1004,21 @@ class FlinkParser:
         )
         match = func_pattern.search(description)
         if not match:
+            # 前缀类型函数（如 TIMESTAMP '2024-01-01', INTERVAL '5' DAY）
+            if FlinkParser._is_prefix_type_func(func_name):
+                prefix_pattern = re.compile(
+                    r"(?<![a-zA-Z])" + re.escape(func_name) + r"\s+", re.I
+                )
+                prefix_match = prefix_pattern.search(description)
+                if prefix_match:
+                    start = prefix_match.end()
+                    prefix_content = description[start:]
+                    end_idx = len(prefix_content)
+                    for i, c in enumerate(prefix_content):
+                        if c in ',);':
+                            end_idx = i
+                            break
+                    return prefix_content[:end_idx].strip()
             return None
         start = match.end()
         depth = 1
@@ -914,22 +1042,31 @@ class FlinkParser:
 
         关键处理:
         - 忽略括号内的逗号（使用深度计数器）
-        - 支持嵌套括号
+        - 忽略方括号内的逗号（使用方括号深度计数器）
+        - 支持嵌套括号和嵌套方括号
 
         示例:
         "a, b, func(c, d), e" -> ["a", " b", " func(c, d)", " e"]
+        "person.state, Sarg[CA, ID, OR]" -> ["person.state", " Sarg[CA, ID, OR]"]
         """
         args = []
         current = []
-        depth = 0
+        paren_depth = 0  # 括号深度
+        bracket_depth = 0  # 方括号深度
         for char in text:
             if char == "(":
-                depth += 1
+                paren_depth += 1
                 current.append(char)
             elif char == ")":
-                depth -= 1
+                paren_depth -= 1
                 current.append(char)
-            elif char == "," and depth == 0:
+            elif char == "[":
+                bracket_depth += 1
+                current.append(char)
+            elif char == "]":
+                bracket_depth -= 1
+                current.append(char)
+            elif char == "," and paren_depth == 0 and bracket_depth == 0:
                 args.append("".join(current))
                 current = []
             else:
@@ -952,6 +1089,7 @@ class FlinkParser:
 
         实现逻辑:
         - 操作符类型返回 "left func right" 格式
+        - 前缀类型函数返回 "func_name args" 格式（如 TIMESTAMP '2024-01-01'）
         - 函数类型返回 "func_name(args)" 格式
         """
         if not description:
@@ -966,6 +1104,51 @@ class FlinkParser:
         )
         match = func_pattern.search(description)
         if not match:
+            # 前缀类型函数（如 TIMESTAMP '2024-01-01', INTERVAL '5' DAY）
+            if FlinkParser._is_prefix_type_func(func_name):
+                prefix_pattern = re.compile(
+                    r"(?<![a-zA-Z])" + re.escape(func_name) + r"\s+", re.I
+                )
+                prefix_match = prefix_pattern.search(description)
+                if prefix_match:
+                    start = prefix_match.start()
+                    prefix_content = description[start:]
+                    end_idx = len(prefix_content)
+                    for i, c in enumerate(prefix_content):
+                        if c in ',);':
+                            end_idx = i
+                            break
+                    return prefix_content[:end_idx].strip()
+            # 处理多词关键字（如 IS TRUE, IS NULL, IS DISTINCT FROM 等）
+            elif ' ' in func_name:
+                keyword_pattern = re.compile(r'\b' + re.escape(func_name) + r'\b', re.I)
+                match = keyword_pattern.search(description)
+                if match:
+                    pos = match.start()
+                    op_end = match.end()
+                    
+                    # 向左查找左操作数起点
+                    left_start = pos - 1
+                    depth = 0
+                    while left_start >= 0:
+                        ch = description[left_start]
+                        if ch in (')', ']', '}'):
+                            depth += 1
+                        elif ch in ('(', '[', '{'):
+                            if depth == 0:
+                                left_start += 1
+                                break
+                            depth -= 1
+                        elif depth == 0 and ch in (',', '('):
+                            left_start += 1
+                            break
+                        left_start -= 1
+                    else:
+                        left_start = 0
+                    
+                    left_expr = description[left_start:pos].strip()
+                    if left_expr:
+                        return f"{left_expr} {func_name}"
             return func_name
         start = match.start()
         depth = 0
@@ -977,6 +1160,178 @@ class FlinkParser:
                 if depth == 0:
                     return description[start:i + 1]
         return description[start:]
+
+    @staticmethod
+    def _extract_all_func_expressions(func_name, description):
+        """
+        提取所有匹配的函数表达式
+
+        参数说明:
+        :param func_name: str，函数名
+        :param description: str，描述文本
+        :return: list，所有匹配的完整函数表达式列表
+
+        实现逻辑:
+        - 操作符类型返回包含所有操作数对的列表
+        - 前缀类型函数返回所有匹配的列表
+        - 函数类型使用 finditer 找所有匹配，返回 "func_name(args)" 格式列表
+        """
+        if not description:
+            return []
+
+        expressions = []
+
+        if FlinkParser._is_operator_func(func_name):
+            clean_desc = re.sub(r'<[^>]+>[\s:*\+\-]*', ' ', description)
+            is_logical_op = func_name.upper() in ('AND', 'OR')
+            if is_logical_op:
+                func_pattern = re.compile(r'\b' + re.escape(func_name) + r'\b', re.I)
+            else:
+                func_pattern = re.compile(re.escape(func_name), re.I)
+            matches = list(func_pattern.finditer(clean_desc))
+            for match in matches:
+                pos = match.start()
+                op_end = match.end()
+                # 误报过滤（与原方法相同）
+                if func_name == '=' and op_end < len(clean_desc) and clean_desc[op_end] == '[':
+                    continue
+                if func_name == '=' and pos > 0 and clean_desc[pos - 1].isalpha():
+                    continue
+                if func_name in ('=', '<', '>') and pos > 0 and clean_desc[pos - 1] in ('<', '>', '!'):
+                    continue
+                if func_name in ('=', '<', '>') and op_end < len(clean_desc) and clean_desc[op_end] == '=':
+                    continue
+                if func_name == '*' and pos > 0 and clean_desc[pos - 1] == '(' and op_end < len(clean_desc) and clean_desc[op_end] == ')':
+                    continue
+                # 过滤引号内的操作符（字符串字面量中的 AND/OR）
+                if FlinkParser._is_inside_quotes(clean_desc, pos):
+                    continue
+                # 跳过 Sarg[] 内部的内容
+                if FlinkParser._is_inside_sarg(clean_desc, pos):
+                    continue
+                # 额外检查：如果操作符前面是字母、数字或下划线，跳过（避免匹配 _UTF-16LE 中的 -）
+                if pos > 0 and (clean_desc[pos - 1].isalnum() or clean_desc[pos - 1] == '_'):
+                    continue
+                # 向左查找左操作数起点
+                left_start = pos - 1
+                depth = 0
+                while left_start >= 0:
+                    ch = clean_desc[left_start]
+                    if ch in (')', ']', '}'):
+                        depth += 1
+                    elif ch in ('(', '[', '{'):
+                        if depth == 0:
+                            left_start += 1
+                            break
+                        depth -= 1
+                    elif depth == 0 and ch == '=' and not is_logical_op:
+                        if left_start + 1 < len(clean_desc) and clean_desc[left_start + 1] == '[':
+                            depth += 1
+                            left_start -= 1
+                            continue
+                        left_start += 1
+                        break
+                    elif depth == 0 and ch == ',':
+                        left_start += 1
+                        break
+                    elif depth == 0:
+                        if left_start >= 2 and clean_desc[left_start - 2:left_start + 1].upper() == 'AND':
+                            left_start += 1
+                            break
+                        if left_start >= 1 and clean_desc[left_start - 1:left_start + 1].upper() == 'OR':
+                            left_start += 1
+                            break
+                    left_start -= 1
+                else:
+                    left_start = 0
+                if left_start < 0:
+                    left_start = 0
+                # 向右查找右操作数终点
+                right_end = op_end
+                depth = 0
+                while right_end < len(clean_desc):
+                    ch = clean_desc[right_end]
+                    if ch in ('(', '[', '{'):
+                        depth += 1
+                    elif ch in (')', ']', '}'):
+                        if depth == 0:
+                            break
+                        depth -= 1
+                    elif depth == 0 and ch in (',', ')', ']'):
+                        break
+                    elif depth == 0:
+                        if right_end + 3 <= len(clean_desc) and clean_desc[right_end:right_end + 3].upper() == 'AND':
+                            break
+                        if right_end + 2 <= len(clean_desc) and clean_desc[right_end:right_end + 2].upper() == 'OR':
+                            break
+                    right_end += 1
+                left_expr = clean_desc[left_start:pos].strip()
+                right_expr = clean_desc[op_end:right_end].strip()
+                if left_expr and right_expr:
+                    expressions.append(f"{left_expr} {func_name} {right_expr}")
+            return expressions if expressions else [func_name]
+
+        func_pattern = re.compile(
+            re.escape(func_name) + r'\s*\(', re.I
+        )
+
+        for match in func_pattern.finditer(description):
+            start = match.start()
+            depth = 0
+            for i in range(match.end() - 1, len(description)):
+                if description[i] == "(":
+                    depth += 1
+                elif description[i] == ")":
+                    depth -= 1
+                    if depth == 0:
+                        expressions.append(description[start:i + 1])
+                        break
+
+        if not expressions:
+            if FlinkParser._is_prefix_type_func(func_name):
+                prefix_pattern = re.compile(
+                    r"(?<![a-zA-Z])" + re.escape(func_name) + r"\s+", re.I
+                )
+                for prefix_match in prefix_pattern.finditer(description):
+                    start = prefix_match.start()
+                    prefix_content = description[start:]
+                    end_idx = len(prefix_content)
+                    for i, c in enumerate(prefix_content):
+                        if c in ',);':
+                            end_idx = i
+                            break
+                    expressions.append(prefix_content[:end_idx].strip())
+            # 处理多词关键字（如 IS TRUE, IS NULL, IS DISTINCT FROM 等）
+            elif ' ' in func_name:
+                keyword_pattern = re.compile(r'\b' + re.escape(func_name) + r'\b', re.I)
+                for match in keyword_pattern.finditer(description):
+                    pos = match.start()
+                    op_end = match.end()
+                    
+                    # 向左查找左操作数起点
+                    left_start = pos - 1
+                    depth = 0
+                    while left_start >= 0:
+                        ch = description[left_start]
+                        if ch in (')', ']', '}'):
+                            depth += 1
+                        elif ch in ('(', '[', '{'):
+                            if depth == 0:
+                                left_start += 1
+                                break
+                            depth -= 1
+                        elif depth == 0 and ch in (',', '('):
+                            left_start += 1
+                            break
+                        left_start -= 1
+                    else:
+                        left_start = 0
+                    
+                    left_expr = description[left_start:pos].strip()
+                    if left_expr:
+                        expressions.append(f"{left_expr} {func_name}")
+
+        return expressions if expressions else [func_name]
 
     @staticmethod
     def _expr_to_string(expr):
@@ -1196,17 +1551,17 @@ class FlinkParser:
         :return: list，不支持函数的列表
 
         分析流程:
-        1. 构建函数参数类型映射
+        1. 构建函数参数类型映射（每个函数调用独立）
         2. 分析不支持的函数
         3. 解析每个不支持函数的参数类型和嵌套内容
-        4. 返回标准化的结果列表
+        4. 返回标准化的结果列表，每个函数调用有独立的类型信息
 
         返回结构:
         [
             {
                 "func_name": str，函数名,
                 "task_id": str，任务 ID,
-                "input": list，输入类型列表,
+                "input": list，输入类型列表（每个调用独立）,
                 "nested_content": str，嵌套内容,
                 "times": int，出现次数,
                 "unsupported_types": list（可选），不支持的类型
@@ -1216,7 +1571,7 @@ class FlinkParser:
         if not description:
             return []
 
-        # 构建函数参数类型映射
+        # 构建函数参数类型映射（每个函数调用独立）
         param_types_map = self._build_func_param_types_map(description, input_schema)
 
         # 分析不支持的函数
@@ -1226,25 +1581,53 @@ class FlinkParser:
         result = []
         for func in unsupported_funcs:
             func_name = func["func_name"]
-            # 解析参数类型和嵌套内容
-            func_input_types, nested_content = self._resolve_func_param_types(
-                func_name, description, input_schema
-            )
-            # 如果所有类型都已知，清空嵌套内容
-            if func_input_types and all(t != "unknown" for t in func_input_types):
-                nested_content = ""
-            entry = {
-                "func_name": func_name,
-                "task_id": task_id,
-                "input": func_input_types,
-                "nested_content": nested_content,
-                "times": func["times"]
-            }
-            # 添加不支持的类型列表
-            unsupported_types = func.get("unsupported_types", [])
-            if unsupported_types:
-                entry["unsupported_types"] = unsupported_types
-            result.append(entry)
+            
+            # 获取函数的完整表达式列表，并去重（保持顺序）
+            all_exprs = self._extract_all_func_expressions(func_name, description)
+            if not all_exprs or all_exprs == [func_name]:
+                # 如果提取不到完整表达式，使用默认值
+                all_exprs = [func_name]
+            
+            # 去重，保持顺序
+            seen = set()
+            unique_exprs = []
+            for expr in all_exprs:
+                if expr not in seen:
+                    seen.add(expr)
+                    unique_exprs.append(expr)
+            all_exprs = unique_exprs
+
+            # 每个不同的嵌套内容单独一行，保持原来的 times 逻辑
+            for i, expr in enumerate(all_exprs):
+                # 从 param_types_map 获取该表达式对应的类型
+                input_types = []
+                if param_types_map:
+                    # 尝试使用 (func_name, expr) 作为键
+                    key = (func_name, expr)
+                    if key in param_types_map:
+                        input_types = param_types_map[key]
+                    elif func_name in param_types_map:
+                        # 兼容旧格式
+                        input_types = param_types_map[func_name]
+                
+                # 如果还是没找到，尝试解析
+                if not input_types:
+                    input_types, _ = self._resolve_func_param_types(
+                        func_name, expr, input_schema
+                    )
+
+                entry = {
+                    "func_name": func_name,
+                    "task_id": task_id,
+                    "input": input_types,
+                    "nested_content": expr,
+                    "times": func["times"] if i == 0 else ""
+                }
+                # 添加不支持的类型列表
+                unsupported_types = func.get("unsupported_types", [])
+                if unsupported_types:
+                    entry["unsupported_types"] = unsupported_types
+                result.append(entry)
         return result
 
     def _build_func_param_types_map(self, description, input_schema=None):
@@ -1254,25 +1637,47 @@ class FlinkParser:
         参数说明:
         :param description: str，描述文本
         :param input_schema: list，输入 schema
-        :return: dict，{函数名: [参数类型列表]}
+        :return: dict，{(函数名, 表达式): [参数类型列表]}
 
         实现逻辑:
         1. 解析描述中的所有函数
-        2. 对每个函数解析其参数类型
-        3. 构建映射字典
+        2. 对每个函数调用（按完整表达式区分）解析其参数类型
+        3. 构建映射字典，使用 (func_name, expression) 作为键
 
         设计目的:
         为函数分析提供参数类型信息，用于判断函数是否支持
+        每个函数调用（即使是同名函数）都有独立的类型信息
         """
         param_types_map = {}
         all_funcs = self.function_parser.parse_plan_description(description)
+        
+        # 使用集合来跟踪已经处理过的表达式，避免重复
+        processed_exprs = set()
+        
         for func_info in all_funcs:
             func_name = func_info.get("func", "")
             if not func_name:
                 continue
-            types, _ = self._resolve_func_param_types(func_name, description, input_schema)
-            if types:
-                param_types_map[func_name] = types
+            
+            # 获取所有完整表达式
+            all_exprs = self._extract_all_func_expressions(func_name, description)
+            if not all_exprs or all_exprs == [func_name]:
+                # 如果提取不到完整表达式，使用函数名作为 fallback
+                all_exprs = [func_name]
+            
+            # 对每个表达式单独处理
+            for expr in all_exprs:
+                # 跳过已经处理过的表达式
+                if (func_name, expr) in processed_exprs:
+                    continue
+                processed_exprs.add((func_name, expr))
+                
+                # 使用表达式本身作为上下文来解析类型，而不是整个 description
+                types, _ = self._resolve_func_param_types(func_name, expr, input_schema)
+                if types:
+                    # 使用 (func_name, expression) 作为键，确保每个调用独立
+                    param_types_map[(func_name, expr)] = types
+        
         return param_types_map
 
     def _resolve_func_param_types(self, func_name, description, input_schema=None):
@@ -1381,6 +1786,8 @@ class FlinkParser:
         """
         input_types = []
         nested_content = existing_nested
+        has_unknown = False
+        found_expr = None
 
         indices = json_desc.get("indices", [])
         condition = json_desc.get("condition")
@@ -1394,24 +1801,56 @@ class FlinkParser:
                 expr_type = expr.get("exprType", "")
                 # FUNCTION 类型
                 if expr_type == "FUNCTION" and expr.get("function_name", "").lower() == func_name.lower():
+                    found_expr = expr
                     arguments = expr.get("arguments", [])
-                    for arg in arguments:
-                        t = self.type_resolver.resolve_expression_type(arg, input_schema)
-                        if t == "unknown":
-                            nested_content = nested_content or self._expr_to_string(arg)
-                        input_types.append(t)
+                    # CAST/TRY_CAST 特殊处理
+                    if func_name.lower() in ("cast", "try_cast") and len(arguments) >= 2:
+                        # 第一个参数：源表达式，解析其类型
+                        source_type = self.type_resolver.resolve_expression_type(arguments[0], input_schema)
+                        if source_type == "unknown":
+                            has_unknown = True
+                        input_types.append(source_type)
+                        
+                        # 第二个参数：目标类型，直接提取值
+                        target_arg = arguments[1]
+                        if isinstance(target_arg, dict):
+                            target_type_str = target_arg.get("value", "").strip()
+                        else:
+                            target_type_str = str(target_arg).strip()
+                        
+                        # 标准化目标类型名称（去除可能的括号和精度信息）
+                        if target_type_str:
+                            normalized_target = re.sub(r'\([^)]*\)', '', target_type_str).upper()
+                            input_types.append(normalized_target)
+                        else:
+                            input_types.append("unknown")
+                    else:
+                        # 普通函数处理
+                        for arg in arguments:
+                            t = self.type_resolver.resolve_expression_type(arg, input_schema)
+                            if t == "unknown":
+                                has_unknown = True
+                            input_types.append(t)
                 # BINARY 类型（操作符）
                 elif expr_type == "BINARY" and expr.get("operator", "").lower() == func_name.lower():
+                    found_expr = expr
                     left_expr = expr.get("left", {})
                     right_expr = expr.get("right", {})
                     left_type = self.type_resolver.resolve_expression_type(left_expr, input_schema)
                     right_type = self.type_resolver.resolve_expression_type(right_expr, input_schema)
                     if left_type == "unknown":
-                        nested_content = nested_content or self._expr_to_string(left_expr)
+                        has_unknown = True
                     if right_type == "unknown":
-                        nested_content = nested_content or self._expr_to_string(right_expr)
+                        has_unknown = True
                     input_types.append(left_type)
                     input_types.append(right_type)
+
+        # 如果有无法解析的参数，返回完整表达式或标记需要提取
+        if has_unknown and not nested_content:
+            if found_expr:
+                nested_content = self._expr_to_string(found_expr)
+            else:
+                nested_content = "NEED_FULL_EXPR"
 
         return input_types, nested_content
 
@@ -1444,6 +1883,14 @@ class FlinkParser:
             input_types, nested_content = self._resolve_operator_param_types_from_text(
                 func_name, description, input_schema, existing_nested
             )
+        # IS TRUE/IS FALSE/IS NOT TRUE/IS NOT FALSE/IS NULL/IS NOT NULL/IS DISTINCT FROM 等类型关键字
+        elif func_name.lower() in ('is true', 'is false', 'is not true', 'is not false',
+                                   'is null', 'is not null', 'is distinct from', 'is not distinct from',
+                                   'between', 'not between', 'like', 'not like',
+                                   'similar to', 'not similar to', 'not in', 'exists'):
+            input_types, nested_content = self._resolve_is_boolean_types_from_text(
+                func_name, description, input_schema, existing_nested
+            )
         else:
             args_str = self._extract_function_args_text_from_desc(func_name, description)
             if args_str:
@@ -1459,6 +1906,7 @@ class FlinkParser:
                     )
                 # 普通函数
                 else:
+                    has_unknown = False
                     args = self._split_function_args(args_str)
                     for arg in args:
                         arg = arg.strip()
@@ -1466,14 +1914,19 @@ class FlinkParser:
                             continue
                         t = self.type_resolver.resolve_expression_type(arg, input_schema)
                         if t == "unknown":
-                            nested_content = nested_content or arg
+                            has_unknown = True
                         input_types.append(t)
+                    # 如果有无法解析的参数，标记需要提取完整表达式
+                    if has_unknown and not nested_content:
+                        nested_content = "NEED_FULL_EXPR"
 
-        # 如果没有嵌套内容，尝试提取完整表达式
-        if not nested_content:
+        # 如果没有嵌套内容或标记需要提取完整表达式，尝试提取完整表达式
+        if not nested_content or nested_content == "NEED_FULL_EXPR":
             full_expr = self._extract_func_expression(func_name, description)
             if full_expr and full_expr != func_name:
                 nested_content = full_expr
+            else:
+                nested_content = ""
 
         return input_types, nested_content
 
@@ -1495,17 +1948,256 @@ class FlinkParser:
         """
         input_types = []
         nested_content = existing_nested
+        has_unknown = False
 
         left_expr, right_expr = self._extract_operator_operands_from_desc(func_name, description)
         if left_expr is not None and right_expr is not None:
             left_type = self.type_resolver.resolve_expression_type(left_expr, input_schema)
             right_type = self.type_resolver.resolve_expression_type(right_expr, input_schema)
             if left_type == "unknown":
-                nested_content = nested_content or left_expr
+                has_unknown = True
             if right_type == "unknown":
-                nested_content = nested_content or right_expr
+                has_unknown = True
             input_types.append(left_type)
             input_types.append(right_type)
+
+        # 如果有无法解析的操作数，标记需要提取完整表达式
+        if has_unknown and not nested_content:
+            nested_content = "NEED_FULL_EXPR"
+
+        return input_types, nested_content
+
+    def _resolve_is_boolean_types_from_text(self, func_name, description, input_schema, existing_nested):
+        """
+        解析 IS TRUE/IS FALSE/IS NULL/IS NOT NULL/BETWEEN/LIKE/NOT IN/EXISTS 等关键字的参数类型
+
+        参数说明:
+        :param func_name: str，关键字名
+        :param description: str，描述文本
+        :param input_schema: list，输入 schema
+        :param existing_nested: str，已有的嵌套内容
+        :return: tuple，(参数类型列表, 嵌套内容)
+        """
+        input_types = []
+        nested_content = existing_nested
+        has_unknown = False
+        func_lower = func_name.lower()
+
+        # 使用不区分大小写匹配
+        pattern = re.compile(re.escape(func_name), re.I)
+        match = pattern.search(description)
+        if match:
+            pos = match.start()
+            op_end = match.end()
+            
+            # 向左查找左操作数起点
+            left_start = pos - 1
+            depth = 0
+            while left_start >= 0:
+                ch = description[left_start]
+                if ch in (')', ']', '}'):
+                    depth += 1
+                elif ch in ('(', '[', '{'):
+                    if depth == 0:
+                        left_start += 1
+                        break
+                    depth -= 1
+                elif depth == 0 and ch in (',', '(', '[', ')'):
+                    left_start += 1
+                    break
+                left_start -= 1
+            else:
+                left_start = 0
+            
+            left_expr = description[left_start:pos].strip()
+            
+            # 根据不同关键字类型处理
+            # IS NULL, IS NOT NULL, IS TRUE, IS FALSE 等 - 单操作数
+            if func_lower in ('is null', 'is not null', 'is true', 'is false', 'is not true', 'is not false'):
+                if left_expr:
+                    left_type = self.type_resolver.resolve_expression_type(left_expr, input_schema)
+                    if left_type == "unknown":
+                        has_unknown = True
+                    input_types.append(left_type)
+                    nested_content = f"{left_expr} {func_name}"
+
+            # IS DISTINCT FROM, IS NOT DISTINCT FROM, LIKE, NOT LIKE, SIMILAR TO, NOT SIMILAR TO - 双操作数
+            elif func_lower in ('is distinct from', 'is not distinct from', 'like', 'not like', 'similar to',
+                                'not similar to'):
+                if left_expr:
+                    left_type = self.type_resolver.resolve_expression_type(left_expr, input_schema)
+                    if left_type == "unknown":
+                        has_unknown = True
+                    input_types.append(left_type)
+                
+                # 向右查找右操作数（跳过开头空格）
+                right_start = op_end
+                while right_start < len(description) and description[right_start].isspace():
+                    right_start += 1
+                
+                depth = 0
+                right_end = right_start
+                while right_end < len(description):
+                    ch = description[right_end]
+                    if ch in ('(', '[', '{'):
+                        depth += 1
+                    elif ch in (')', ']', '}'):
+                        if depth == 0:
+                            break
+                        depth -= 1
+                    elif depth == 0 and ch in (',', ')'):
+                        break
+                    right_end += 1
+                
+                right_expr = description[right_start:right_end].strip()
+                if right_expr:
+                    right_type = self.type_resolver.resolve_expression_type(right_expr, input_schema)
+                    if right_type == "unknown":
+                        has_unknown = True
+                    input_types.append(right_type)
+                
+                full_expr = description[left_start:right_end].strip()
+                if full_expr:
+                    nested_content = full_expr
+            
+            # BETWEEN, NOT BETWEEN - 三操作数 (expr BETWEEN a AND b)
+            elif func_lower in ('between', 'not between'):
+                if left_expr:
+                    left_type = self.type_resolver.resolve_expression_type(left_expr, input_schema)
+                    if left_type == "unknown":
+                        has_unknown = True
+                    input_types.append(left_type)
+                
+                # 向右查找第一个操作数（到 AND 为止）
+                right_start = op_end
+                while right_start < len(description) and description[right_start].isspace():
+                    right_start += 1
+                
+                depth = 0
+                and_pos = -1
+                temp_pos = right_start
+                while temp_pos < len(description):
+                    ch = description[temp_pos]
+                    if ch in ('(', '[', '{'):
+                        depth += 1
+                    elif ch in (')', ']', '}'):
+                        depth -= 1
+                    elif depth == 0 and temp_pos + 2 < len(description):
+                        if description[temp_pos:temp_pos+3].upper() == 'AND':
+                            and_pos = temp_pos
+                            break
+                    temp_pos += 1
+                
+                if and_pos > 0:
+                    first_expr = description[right_start:and_pos].strip()
+                    if first_expr:
+                        first_type = self.type_resolver.resolve_expression_type(first_expr, input_schema)
+                        if first_type == "unknown":
+                            has_unknown = True
+                        input_types.append(first_type)
+                    
+                    # 查找 AND 后面的第二个操作数
+                    second_start = and_pos + 3
+                    while second_start < len(description) and description[second_start].isspace():
+                        second_start += 1
+                    
+                    depth = 0
+                    second_end = second_start
+                    while second_end < len(description):
+                        ch = description[second_end]
+                        if ch in ('(', '[', '{'):
+                            depth += 1
+                        elif ch in (')', ']', '}'):
+                            if depth == 0:
+                                break
+                            depth -= 1
+                        elif depth == 0 and ch in (',', ')'):
+                            break
+                        second_end += 1
+                    
+                    second_expr = description[second_start:second_end].strip()
+                    if second_expr:
+                        second_type = self.type_resolver.resolve_expression_type(second_expr, input_schema)
+                        if second_type == "unknown":
+                            has_unknown = True
+                        input_types.append(second_type)
+                
+                # 构建完整表达式（包括 AND 和第二个操作数）
+                full_end = right_start
+                if and_pos > 0:
+                    full_end = second_end
+                full_expr = description[left_start:full_end].strip()
+                if full_expr:
+                    nested_content = full_expr
+            
+            # NOT IN - 多操作数
+            elif func_lower == 'not in':
+                if left_expr:
+                    left_type = self.type_resolver.resolve_expression_type(left_expr, input_schema)
+                    if left_type == "unknown":
+                        has_unknown = True
+                    input_types.append(left_type)
+                
+                # 查找括号内的内容（跳过开头空格）
+                right_start = op_end
+                while right_start < len(description) and description[right_start].isspace():
+                    right_start += 1
+                
+                # 找到左括号
+                while right_start < len(description) and description[right_start] != '(':
+                    right_start += 1
+                
+                if right_start < len(description) and description[right_start] == '(':
+                    depth = 1
+                    right_end = right_start + 1
+                    while right_end < len(description):
+                        ch = description[right_end]
+                        if ch == '(':
+                            depth += 1
+                        elif ch == ')':
+                            depth -= 1
+                            if depth == 0:
+                                right_end += 1
+                                break
+                        right_end += 1
+                    
+                    args_str = description[right_start:right_end].strip()
+                    if args_str:
+                        nested_content = f"{left_expr} {func_name} {args_str}"
+            
+            # EXISTS - 子查询
+            elif func_lower == 'exists':
+                # 查找括号内的子查询（跳过开头空格）
+                right_start = op_end
+                while right_start < len(description) and description[right_start].isspace():
+                    right_start += 1
+                
+                # 找到左括号
+                while right_start < len(description) and description[right_start] != '(':
+                    right_start += 1
+                
+                if right_start < len(description) and description[right_start] == '(':
+                    depth = 1
+                    right_end = right_start + 1
+                    while right_end < len(description):
+                        ch = description[right_end]
+                        if ch == '(':
+                            depth += 1
+                        elif ch == ')':
+                            depth -= 1
+                            if depth == 0:
+                                right_end += 1
+                                break
+                        right_end += 1
+                    
+                    subquery = description[right_start:right_end].strip()
+                    if subquery:
+                        nested_content = f"{func_name} {subquery}"
+                        input_types.append("unknown")
+
+        # 如果有无法解析的操作数，标记需要提取完整表达式
+        if has_unknown and not nested_content:
+            nested_content = "NEED_FULL_EXPR"
 
         return input_types, nested_content
 
@@ -1524,11 +2216,12 @@ class FlinkParser:
 
         解析逻辑:
         - 按逗号分割参数
-        - 跳过条件，只处理值部分（索引为奇数的参数）
-        - 最后一个参数如果是 ELSE 值，也需要处理
+        - 处理条件和值对
+        - 如果任何参数类型无法解析，标记需要提取完整表达式
         """
         input_types = []
         nested_content = existing_nested
+        has_unknown = False
 
         args = FlinkTypeResolver._split_function_args(args_str)
         i = 0
@@ -1539,11 +2232,31 @@ class FlinkParser:
                 condition_arg = self._strip_outer_parens(condition_arg)
                 t = self.type_resolver.resolve_expression_type(condition_arg, input_schema)
                 if t == "unknown":
-                    nested_content = nested_content or condition_arg
+                    has_unknown = True
                 input_types.append(t)
+                
+                # 处理值（索引为奇数）
+                value_arg = args[i + 1].strip()
+                value_arg = self._strip_outer_parens(value_arg)
+                t = self.type_resolver.resolve_expression_type(value_arg, input_schema)
+                if t == "unknown":
+                    has_unknown = True
+                input_types.append(t)
+                
                 i += 2
             else:
+                # 处理 ELSE 值（最后一个参数）
+                value_arg = args[i].strip()
+                value_arg = self._strip_outer_parens(value_arg)
+                t = self.type_resolver.resolve_expression_type(value_arg, input_schema)
+                if t == "unknown":
+                    has_unknown = True
+                input_types.append(t)
                 break
+
+        # 如果有无法解析的参数，标记需要提取完整表达式
+        if has_unknown and not nested_content:
+            nested_content = "NEED_FULL_EXPR"
 
         return input_types, nested_content
 
@@ -1561,11 +2274,13 @@ class FlinkParser:
 
         解析逻辑:
         1. 使用 AS 分割表达式和目标类型
-        2. 解析原始表达式的类型
-        3. 返回类型列表（只包含输入类型，目标类型不作为参数）
+        2. 解析原始表达式的类型（源类型）
+        3. 提取目标类型字符串
+        4. 如果原始表达式类型无法解析，标记需要提取完整表达式
         """
         input_types = []
         nested_content = existing_nested
+        has_unknown = False
 
         # 使用类型解析器的方法分割
         original_expr, target_type_str = FlinkTypeResolver._split_alias_from_expr(args_str)
@@ -1576,11 +2291,21 @@ class FlinkParser:
                 original_expr = parts[0].strip()
                 target_type_str = parts[1].strip()
 
-        # 解析原始表达式的类型
-        t = self.type_resolver.resolve_expression_type(original_expr, input_schema)
-        if t == "unknown":
-            nested_content = nested_content or original_expr
-        input_types.append(t)
+        # 解析原始表达式的类型（源类型）
+        source_type = self.type_resolver.resolve_expression_type(original_expr, input_schema)
+        if source_type == "unknown":
+            has_unknown = True
+        input_types.append(source_type)
+
+        # 添加目标类型（用于白名单检查）
+        if target_type_str:
+            # 标准化目标类型名称（去除可能的括号和精度信息）
+            normalized_target = re.sub(r'\([^)]*\)', '', target_type_str.strip()).upper()
+            input_types.append(normalized_target)
+
+        # 如果原始表达式类型无法解析，标记需要提取完整表达式
+        if has_unknown and not nested_content:
+            nested_content = "NEED_FULL_EXPR"
 
         return input_types, nested_content
 
@@ -2071,7 +2796,8 @@ class FlinkParser:
                     else:
                         input_types.append(field_type)
                 else:
-                    input_types.append(field_type)
+                    # 优先使用原始类型，保留精度信息（如 TIMESTAMP(3)）
+                    input_types.append(f.get("original_type") or field_type)
 
         input_str = ",".join(t for t in input_types if t)
 

@@ -98,9 +98,9 @@ OMNI_TYPE_ID_MAP = {
 TYPE_PATTERNS = [
     (re.compile(r"^true$|^false$", re.I), "BOOLEAN"),
     (re.compile(r"^NULL$", re.I), "NULL"),
-    (re.compile(r"^-?\d+$"), "INT"),
+    (re.compile(r"^-?\d+$"), "BIGINT"),
     (re.compile(r"^-?\d+[Ll]$"), "BIGINT"),
-    (re.compile(r"^-?\d+\.\d+$"), "DOUBLE"),
+    (re.compile(r"^-?\d+\.\d+$"), "DECIMAL128"),
     (re.compile(r"^\d{4}-\d{2}-\d{2}$"), "DATE"),
     (re.compile(r"^\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}"), "TIMESTAMP"),
     (re.compile(r"^INTERVAL\s+", re.I), "INTERVAL"),
@@ -561,11 +561,11 @@ class FlinkTypeResolver:
 
         # 整数
         if isinstance(value, int):
-            return "INT"
+            return "BIGINT"
 
         # 浮点数
         if isinstance(value, float):
-            return "DOUBLE"
+            return "DECIMAL128"
 
         # 字符串类型的字面量
         if isinstance(value, str):
@@ -578,6 +578,10 @@ class FlinkTypeResolver:
             # 引号包裹的字符串 → VARCHAR
             if (value_str.startswith("'") and value_str.endswith("'")) or \
                     (value_str.startswith('"') and value_str.endswith('"')):
+                return "VARCHAR"
+
+            # 特殊处理 Sarg[...] 类型 → VARCHAR
+            if value_str.startswith('Sarg[') or value_str.startswith('SARG['):
                 return "VARCHAR"
 
             # 使用正则模式匹配特殊格式
@@ -1065,46 +1069,57 @@ class FlinkTypeResolver:
                 (expr_str.startswith('"') and expr_str.endswith('"')):
             return "VARCHAR"
 
-        # 优先级2：类型模式匹配
+        # 优先级2：Sarg[...] 特殊处理 → VARCHAR
+        if expr_str.upper().startswith('SARG[') and expr_str.endswith(']'):
+            return "VARCHAR"
+
+        # 优先级3：类型模式匹配
         for pattern, match_type in TYPE_PATTERNS:
             if pattern.match(expr_str):
                 return match_type
 
-        # 优先级3：NULL 关键字
+        # 优先级4：NULL 关键字
         if expr_str.upper() == "NULL":
             return "NULL"
 
-        # 优先级4：布尔关键字
+        # 优先级5：布尔关键字
         if expr_str.upper() in ("TRUE", "FALSE"):
             return "BOOLEAN"
 
-        # 优先级5：字段名查找（小写）
+        # 优先级6：DISTINCT 关键字语法糖（如 "DISTINCT bidder" 等同于 "DISTINCT(bidder)"）
+        distinct_match = re.match(r'^(DISTINCT)\s+(.+)', expr_str.strip(), re.I)
+        if distinct_match:
+            inner_expr = distinct_match.group(2).strip()
+            return self.resolve_text_expr_type(inner_expr, input_schema, depth + 1, visited=visited)
+
+        # 优先级7：字段名查找（小写）
         name_lower = expr_str.lower()
         if name_lower in self.column_type:
             return self.column_type[name_lower]
 
-        # 优先级6：嵌套字段路径解析
+        # 优先级8：嵌套字段路径解析
         if "." in expr_str:
             nested_type = self._resolve_nested_field_path(expr_str)
             if nested_type and nested_type != UNKNOWN:
                 return nested_type
 
-        # 优先级7：输入 schema 查找
+        # 优先级9：输入 schema 查找
         if input_schema:
             for field in input_schema:
                 if field.get("field_name", "").lower() == name_lower:
-                    return field.get("field_type", UNKNOWN)
+                    # 优先使用原始类型，保留精度信息（如 TIMESTAMP(3)）
+                    return field.get("original_type") or field.get("field_type", UNKNOWN)
 
         alias_resolved = self._resolve_alias(expr_str, visited=visited)
         if alias_resolved and alias_resolved != UNKNOWN:
             return alias_resolved
 
-        # 优先级9：比较表达式
+        # 优先级10：比较表达式
         comparison_type = self._resolve_comparison_type(expr_str, input_schema, depth)
         if comparison_type:
             return comparison_type
 
-        # 优先级10：函数调用
+        # 优先级11：函数调用
         func_type = self._resolve_text_function_type(expr_str, input_schema, depth)
         if func_type and func_type != UNKNOWN:
             return func_type
@@ -1630,22 +1645,30 @@ class FlinkTypeResolver:
         items = []
         current = []
         depth = 0
+        in_string = False
+        string_char = None
 
         for char in text:
-            if char == "(":
+            if not in_string and char in ("'", '"'):
+                in_string = True
+                string_char = char
+                current.append(char)
+            elif in_string and char == string_char:
+                in_string = False
+                string_char = None
+                current.append(char)
+            elif not in_string and char == "(":
                 depth += 1
                 current.append(char)
-            elif char == ")":
+            elif not in_string and char == ")":
                 depth -= 1
                 current.append(char)
-            elif char == "," and depth == 0:
-                # 只有在最外层（深度为0）才分割
+            elif not in_string and char == "," and depth == 0:
                 items.append("".join(current))
                 current = []
             else:
                 current.append(char)
 
-        # 添加最后一个项目
         if current:
             items.append("".join(current))
 
@@ -2012,8 +2035,9 @@ class FlinkTypeResolver:
                 schema_entry = {
                     "field_name": name,
                     "field_type": TypeNormalizer.normalize_type(type_str),
+                    "original_type": type_str,
                 }
-                # ★ 修改点：从 table_schema 中查找原始类型
+                # 对于 ROW 类型，从 table_schema 中查找原始类型（可能包含更详细的信息）
                 original_type = self._find_original_type_from_table_schema(name)
                 if original_type:
                     schema_entry["original_type"] = original_type

@@ -96,10 +96,10 @@ class OperatorMetricsParser:
     @staticmethod
     def aggregate_metrics(op_list):
         """聚合同类型算子的指标"""
-        num_in = sum(op["metrics"].get("numRecordsIn", 0) for op in op_list)
-        num_in_sec = sum(op["metrics"].get("numRecordsInPerSecond", 0.0) for op in op_list)
-        num_out = sum(op["metrics"].get("numRecordsOut", 0) for op in op_list)
-        num_out_sec = sum(op["metrics"].get("numRecordsOutPerSecond", 0.0) for op in op_list)
+        num_in = sum(op["metrics"].get("numBytesIn", 0) for op in op_list)
+        num_in_sec = sum(op["metrics"].get("numBytesInPerSecond", 0.0) for op in op_list)
+        num_out = sum(op["metrics"].get("numBytesOut", 0) for op in op_list)
+        num_out_sec = sum(op["metrics"].get("numBytesOutPerSecond", 0.0) for op in op_list)
         return num_in, num_in_sec, num_out, num_out_sec
 
     @staticmethod

@@ -847,7 +847,7 @@ class FunctionAnalyzer:
         has_unknown = False
 
         from omnihelper.flink.schema.type_resolver import FlinkTypeResolver
-        args = FlinkTypeResolver._split_function_args(args_str)
+        args = FlinkTypeResolver._wrap_split_function_args(args_str)
         i = 0
         while i < len(args):
             if i + 1 < len(args):
@@ -887,7 +887,7 @@ class FunctionAnalyzer:
         has_unknown = False
 
         from omnihelper.flink.schema.type_resolver import FlinkTypeResolver
-        original_expr, target_type_str = FlinkTypeResolver._split_alias_from_expr(args_str)
+        original_expr, target_type_str = FlinkTypeResolver._wrap_split_alias_from_expr(args_str)
         
         if original_expr == args_str and " AS " in args_str.upper():
             parts = re.split(r'\s+AS\s+', args_str, maxsplit=1, flags=re.I)

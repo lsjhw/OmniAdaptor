@@ -15,12 +15,15 @@ import com.huawei.omniruntime.flink.runtime.metrics.groups.OmniTaskIOMetricGroup
 import com.huawei.omniruntime.flink.runtime.metrics.groups.OmniTaskMetricGroup;
 
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.metrics.SimpleCounter;
 import org.apache.flink.metrics.View;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.Meter;
 import org.apache.flink.metrics.Metric;
+import org.apache.flink.runtime.jobgraph.OperatorID;
+import org.apache.flink.runtime.metrics.MetricNames;
 import org.apache.flink.runtime.metrics.MetricRegistryImpl;
 import org.apache.flink.runtime.metrics.ViewUpdater;
 import org.apache.flink.runtime.metrics.dump.MetricQueryService;
@@ -31,9 +34,13 @@ import org.apache.flink.runtime.metrics.groups.InternalOperatorMetricGroup;
 import org.apache.flink.runtime.metrics.groups.ProxyMetricGroup;
 import org.apache.flink.runtime.metrics.groups.TaskIOMetricGroup;
 import org.apache.flink.runtime.metrics.groups.TaskMetricGroup;
+import org.apache.flink.streaming.api.graph.StreamConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +53,7 @@ import java.util.Optional;
  * @since 2025-04-16
  */
 public class OmniMetricHelper {
+    private static final Logger LOG = LoggerFactory.getLogger(OmniMetricHelper.class);
     /**
      * Creates an OmniSimpleCounter instance with the specified parameters.
      *
@@ -177,6 +185,32 @@ public class OmniMetricHelper {
                     omniInternalOperatorIOMetricGroup);
         }
         return omniTaskMetricGroup;
+    }
+
+    public static void registerNativeMetrics(TaskMetricGroup metrics, long nativeRefTaskMetricGroupRef,
+                                             Collection<StreamConfig> chainedConfigs) {
+        for (StreamConfig chainedConfig : chainedConfigs) {
+            if (!chainedConfig.getOperatorName().contains("Source")) {
+                continue;
+            }
+            String metricsMapKey = getMetricsMapKey(chainedConfig.getOperatorName(), chainedConfig.getOperatorID());
+            long nativeRef = createNativeSimpleCounter(nativeRefTaskMetricGroupRef,
+                    "OmniInternalOperatorIOMetricGroup_" + metricsMapKey, MetricNames.IO_NUM_RECORDS_OUT);
+            InternalOperatorMetricGroup operatorMetricGroup =
+                    metrics.getOrAddOperator(chainedConfig.getOperatorID(), chainedConfig.getOperatorName());
+            ((SimpleCounter) operatorMetricGroup.getIOMetricGroup().getNumRecordsOutCounter()).setNativeRef(nativeRef);
+        }
+    }
+
+    private static String getMetricsMapKey(String operatorName, OperatorID operatorID) {
+        final String truncatedOperatorName;
+        // some UDF operatorName is too long
+        if (operatorName != null && operatorName.length() > 80) {
+            truncatedOperatorName = operatorName.substring(0, 80);
+        } else {
+            truncatedOperatorName = operatorName;
+        }
+        return operatorID + truncatedOperatorName;
     }
 
     /**

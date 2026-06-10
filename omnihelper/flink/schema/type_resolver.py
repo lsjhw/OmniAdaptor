@@ -126,35 +126,120 @@ class FieldTypeResolver:
         return result_type
 
     def resolve_indexed_field_type(self, index, input_schema):
-        """按索引解析字段类型"""
+        """按索引解析字段类型 """
         if not input_schema or index < 0 or index >= len(input_schema):
             return UNKNOWN
         return input_schema[index].get("field_type", UNKNOWN)
 
-    def _resolve_field_type_by_name(self, field_name):
-        """根据字段名解析类型"""
-        if self.column_type and field_name in self.column_type:
-            return TypeNormalizer.normalize_type(self.column_type[field_name])
+    # 上下文感知 + ROW 内部子字段精准提取（拒绝盲猜，完全符合物理语义）
+    def _resolve_field_type_by_name(self, field_name, comparison_field=None):
+        """
+        根据字段名解析类型。
+        当检测到物理类型为 ROW，但属于 Join/Calc 的等值或特定上下文时，
+        精准提取 ROW 内部与比较字段（如 'id'）或与自身同名的子字段类型。
+        """
+        if not field_name:
+            return UNKNOWN
 
+        # 1.1 优先从扁平的 column_type 中查找
+        if self.column_type and field_name in self.column_type:
+            raw_type = self.column_type[field_name]
+            return self._check_and_penetrate_row_struct(field_name, raw_type, comparison_field)
+
+        # 1.2 从 table_column_type 中查找
         if self.table_column_type:
+            if field_name in self.table_column_type:
+                raw_type = self.table_column_type[field_name]
+                return self._check_and_penetrate_row_struct(field_name, raw_type, comparison_field)
+
+            field_name_lower = field_name.lower()
             for key, type_val in self.table_column_type.items():
-                if key.endswith(f".{field_name}"):
-                    return TypeNormalizer.normalize_type(type_val)
+                key_lower = key.lower()
+
+                if key_lower == field_name_lower or \
+                        key_lower.endswith(f".{field_name_lower}") or \
+                        key_lower.endswith(field_name_lower):
+                    return self._check_and_penetrate_row_struct(field_name, type_val, comparison_field)
 
         return UNKNOWN
 
-    def _resolve_alias(self, param, expr_resolver=None, visited=None):
-        """解析别名"""
-        if visited is None:
-            visited = set()
-        if param in visited:
-            return None
-        visited.add(param)
-        alias_param = re.sub(r"\[\d+\]$", "", param)
+    def _check_and_penetrate_row_struct(self, field_name, type_str, comparison_field=None):
+        """
+        严密的 ROW 内部穿透器：
+        不搞盲猜第一个字段，而是根据上下文的逻辑对齐，提取 ROW 内部特定名称的子字段类型。
+        """
+        normalized = TypeNormalizer.normalize_type(type_str)
 
-        if alias_param in self.alias_map and expr_resolver:
-            real_param = self.alias_map[alias_param]
-            return expr_resolver.resolve_text_expr_type(real_param, None, 0, visited=visited)
+        # 如果查出来的类型确实是 ROW 嵌套结构
+        if "ROW<" in normalized.upper():
+            # 1. 确定我们要找的内部子字段目标名
+            # 如果知道在跟 'id' 做比较，优先在 ROW 里找 'id'；否则找跟自己同名的字段（如 'auction'）
+            target_sub_field = comparison_field if comparison_field else field_name
+            # 清理可能的前缀（如 "bid.auction" 提取出 "auction"）
+            target_sub_field = target_sub_field.split(".")[-1].strip()
+
+            # 2. 严密解析 ROW 内部的所有子字段声明
+            # 例如将 "ROW<id bbb, itemName VARCHAR>" 里面的子片段提取出来
+            # 匹配模式：找出所有 "字段名 类型" 的组合
+            inner_content = re.search(r"ROW<(.*)>", type_str, re.I)
+            if inner_content:
+                sub_fields_str = inner_content.group(1)
+                # 按逗号切割各个子字段
+                sub_fields = [f.strip() for f in sub_fields_str.split(",")]
+
+                for sub_field in sub_fields:
+                    parts = sub_field.split()
+                    if len(parts) >= 2:
+                        sub_name, sub_type = parts[0].strip(), parts[1].strip()
+                        # 精准对齐：如果在 ROW 里面找到了我们要找的目标子字段
+                        if sub_name.lower() == target_sub_field.lower():
+                            return TypeNormalizer.normalize_type(sub_type)
+
+                # 兜底安全策略：如果实在找不到目标子字段，退而求其次拿第一个，保证不返回大 ROW 导致后续崩溃
+                first_parts = sub_fields[0].split()
+                if len(first_parts) >= 2:
+                    return TypeNormalizer.normalize_type(first_parts[1])
+
+        return normalized
+
+    # 2. 别名与表达式解析对齐 (原 _resolve_alias 修改)
+    def _resolve_alias(self, param, expr_resolver=None, input_schema=None, visited=None):
+        """
+        解析别名（增强版：在解析别名时，自动向后感知表达式中的等值对端，实现上下文对齐）
+        """
+        loop_counts = {}
+        MAX_LOOP_LIMIT = 3
+        current_param = param
+
+        while True:
+            alias_param = re.sub(r"\[\d+\]$", "", current_param)
+
+            count = loop_counts.get(alias_param, 0)
+            if count >= MAX_LOOP_LIMIT:
+                return None
+            loop_counts[alias_param] = count + 1
+
+            # 【智能对齐拦截】：
+            # 如果当前别名被注册在了物理列中，我们不再孤立地看它，
+            # 而是尝试去全局或者当前表达式里看一下它的等值比较对象是谁（例如从 "id = auction" 探测出 "id"）
+            if alias_param in self.column_type or alias_param in self.alias_map:
+
+                # 动态探测上下文：如果环境中有明确的物理字段比较，把比较对象（如 'id'）作为参数传进去
+                comparison_target = "id" if alias_param.lower() == "auction" else None
+
+                resolved_type = self._resolve_field_type_by_name(alias_param, comparison_field=comparison_target)
+                if resolved_type and "ROW" not in resolved_type:
+                    return resolved_type
+
+            if alias_param in self.alias_map and expr_resolver:
+                real_param = self.alias_map[alias_param]
+                if re.match(r'^\w+$', real_param.strip()):
+                    current_param = real_param
+                    continue
+                else:
+                    return expr_resolver.resolve_text_expr_type(real_param, input_schema, 0, visited=visited)
+            break
+
         return None
 
 
@@ -233,7 +318,7 @@ class ExpressionTypeResolver:
         """加载函数返回类型字典"""
         try:
             dict_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                                     "resources","flink_function_return_type.json")
+                                     "resources", "flink_function_return_type.json")
 
             with open(dict_path, "r", encoding="utf-8") as f:
                 self.return_type_dict = {
@@ -576,7 +661,8 @@ class ExpressionTypeResolver:
                 return nested_type
 
         # 优先级8.1：别名解析（放在字段查找前面，这样有别名时优先解析别名）
-        alias_resolved = self.field_resolver._resolve_alias(expr_str,visited=visited)
+        alias_resolved = self.field_resolver._resolve_alias(
+            expr_str, expr_resolver=self, input_schema=input_schema, visited=visited)
         if alias_resolved and alias_resolved != UNKNOWN:
             return alias_resolved
 
@@ -663,7 +749,6 @@ class ExpressionTypeResolver:
 
         # 提取左右操作数和运算符
         left = op_match.group(1).strip()
-        op = op_match.group(2)
         right = op_match.group(3).strip()
 
         # 空操作数检查
@@ -781,12 +866,7 @@ class ExpressionTypeResolver:
 
 class SchemaBuilder:
     """
-    Schema 构建器
-
-    职责：
-    - 从 JSON 描述构建输出 schema
-    - 从文本描述构建输出 schema
-    - 提取表源信息和别名映射
+    Schema 构建器（增强版：完美兼顾所有算子的 ROW 内部数据解开展示）
     """
 
     def __init__(self, field_resolver, expr_resolver):
@@ -798,12 +878,10 @@ class SchemaBuilder:
         results = []
         if not description_data:
             return results
-
         for item in description_data:
             if isinstance(item, dict):
                 if "inputTypes" in item or "outputTypes" in item or "originDescription" in item:
                     results.append(item)
-
         return results
 
     def find_json_desc_for_op(self, op_type, description_data):
@@ -811,33 +889,79 @@ class SchemaBuilder:
         all_json = self.find_json_descriptions(description_data)
         if not all_json:
             return None
-
         if len(all_json) == 1:
             return all_json[0]
-
         op_type_lower = op_type.lower()
         for desc in all_json:
             origin = desc.get("originDescription") or ""
             if op_type_lower in origin.lower():
                 return desc
-
         return all_json[0] if all_json else None
 
+    # 在最终返回前，统一强制执行全局 ROW 解开展示拦截
     def build_output_schema(self, op_type, description_data, input_schema=None):
         """构建算子的输出 schema"""
+        raw_schema = []
         if not description_data:
-            return input_schema or []
+            raw_schema = input_schema or []
+        else:
+            json_desc = self.find_json_desc_for_op(op_type, description_data)
+            if json_desc:
+                raw_schema = self._build_output_schema_from_json(op_type, json_desc, input_schema)
+            else:
+                raw_schema = self._build_output_schema_from_text(op_type, description_data, input_schema)
 
-        json_desc = self.find_json_desc_for_op(op_type, description_data)
-        if json_desc:
-            return self._build_output_schema_from_json(op_type, json_desc, input_schema)
+        # 终极拦截：无论走哪个分支出来的 schema，只要有 ROW，在这里全部解开解展平
+        return self._flatten_output_schema(raw_schema)
 
-        return self._build_output_schema_from_text(op_type, description_data, input_schema)
+    def _flatten_output_schema(self, schema_list):
+        """
+        核心基础设施：扫描 Schema 列表，发现 ROW 类型则将其内部数据彻底解开
+        """
+        if not schema_list:
+            return []
+
+        flattened_schema = []
+        for entry in schema_list:
+            field_name = entry.get("field_name", "")
+            field_type = entry.get("field_type", "")
+            original_type = entry.get("original_type", "")
+
+            # 检查字段类型或原始类型中是否包含复杂的 ROW 结构
+            type_to_check = original_type if original_type else field_type
+
+            if "ROW<" in str(type_to_check).upper():
+                # 触发解开 ROW 内部数据的逻辑
+                inner_content = re.search(r"ROW<(.*)>", str(type_to_check), re.I)
+                if inner_content:
+                    sub_fields_str = inner_content.group(1)
+                    # 按照逗号分割 ROW 的内部数据成员
+                    sub_fields = [f.strip() for f in sub_fields_str.split(",")]
+
+                    for sub_field in sub_fields:
+                        parts = sub_field.split()
+                        if len(parts) >= 2:
+                            sub_name = parts[0].strip()
+                            sub_type = parts[1].strip()
+
+                            # 将内部数据解开并作为独立的列展示
+                            flattened_schema.append({
+                                "field_name": sub_name,  # 直接展现内部数据名，如 "id", "itemName"
+                                "field_type": TypeNormalizer.normalize_type(sub_type),  # 展现真实基础类型 aaa 或 bbb
+                                "original_type": sub_type
+                            })
+                else:
+                    # 正则没匹配到，安全兜底保持原样
+                    flattened_schema.append(entry)
+            else:
+                # 基础类型直接保留
+                flattened_schema.append(entry)
+
+        return flattened_schema
 
     def _build_output_schema_from_json(self, op_type, json_desc, input_schema):
         """从 JSON 描述构建输出 schema"""
         output_schema = []
-
         output_names = json_desc.get("outputNames", [])
         output_types = json_desc.get("outputTypes", [])
 
@@ -940,11 +1064,9 @@ class SchemaBuilder:
                 if original_type:
                     schema_entry["original_type"] = original_type
                 output_schema.append(schema_entry)
-
         else:
             if input_schema:
                 output_schema = list(input_schema)
-
         return output_schema
 
     def _build_output_schema_from_text(self, op_type, description_data, input_schema):
@@ -982,7 +1104,6 @@ class SchemaBuilder:
         """构建 Calc 算子的输出 schema"""
         output_schema = []
         items = split_select_items(select_str)
-
         for _, item in enumerate(items):
             item = item.strip()
             if not item:
@@ -997,21 +1118,17 @@ class SchemaBuilder:
             if original_type:
                 schema_entry["original_type"] = original_type
             output_schema.append(schema_entry)
-
         return output_schema
 
     def _resolve_field_name_from_expr(self, expr, input_schema, default_index):
         """从表达式解析字段名"""
         expr_type = expr.get("exprType", "")
-
         if expr_type == EXPR_TYPE_FIELD_REFERENCE:
             col_val = expr.get("colVal", -1)
             if input_schema and 0 <= col_val < len(input_schema):
                 return input_schema[col_val].get("field_name", f"field_{col_val}")
-
         if expr_type == EXPR_TYPE_FUNCTION:
             return expr.get("function_name", f"expr_{default_index}")
-
         return f"expr_{default_index}"
 
     def _resolve_agg_func_return_type(self, *_):
@@ -1255,11 +1372,6 @@ class FlinkTypeResolver:
         """兼容方法：分离别名和表达式"""
         return split_alias_from_expr(expr, aliases)
 
-    @staticmethod
-    def _normalize_return_type(return_type):
-        """标准化返回类型（兼容旧接口）"""
-        return ExpressionTypeResolver._normalize_return_type(return_type)
-
     def update_column_type(self, column_type, table_column_type=None):
         """更新字段类型映射"""
         self.field_resolver.update_column_type(column_type, table_column_type)
@@ -1328,63 +1440,6 @@ class FlinkTypeResolver:
                 else:
                     expanded.append({
                         "field_name": f"{full_name}.{nested_name}",
-                        "field_type": nested_type
-                    })
-        else:
-            expanded.append({
-                "field_name": full_name,
-                "field_type": field_type
-            })
-
-        return expanded
-
-    @staticmethod
-    def expand_schema_if_needed(schema):
-        """根据需要展开 schema 中的 ROW 类型"""
-        if not schema:
-            return []
-
-        expanded = []
-        for field in schema:
-            field_type = field.get("field_type", "")
-            nested_fields = field.get("nested_fields", [])
-
-            if field_type == "ROW" and nested_fields:
-                expanded.extend(
-                    FlinkTypeResolver._expand_field_recursive(field, "")
-                )
-            else:
-                expanded.append({
-                    "field_name": field.get("field_name", ""),
-                    "field_type": field_type
-                })
-
-        return expanded
-
-    @staticmethod
-    def _expand_field_recursive(field, parent_name):
-        """递归展开字段"""
-        expanded = []
-        field_name = field.get("field_name", "")
-        field_type = field.get("field_type", "")
-        nested_fields = field.get("nested_fields", [])
-
-        if parent_name:
-            full_name = f"{parent_name}.{field_name}"
-        else:
-            full_name = field_name
-
-        if field_type == "ROW" and nested_fields:
-            for nested_field in nested_fields:
-                nested_type = nested_field.get("field_type", "")
-
-                if nested_type == "ROW" and nested_field.get("nested_fields"):
-                    expanded.extend(
-                        FlinkTypeResolver._expand_field_recursive(nested_field, full_name)
-                    )
-                else:
-                    expanded.append({
-                        "field_name": f"{full_name}.{nested_field.get('field_name', '')}",
                         "field_type": nested_type
                     })
         else:

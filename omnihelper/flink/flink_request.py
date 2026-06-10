@@ -242,4 +242,12 @@ class FlinkRequester:
             params = {"get": ",".join(metric_ids)} if metric_ids else {}
         else:
             params = {"get": metric_ids} if metric_ids else {}
-        return self._get_json(f"jobs/{jid}/vertices/{vid}/metrics", params=params)
+        result = self._get_json(f"jobs/{jid}/vertices/{vid}/metrics", params=params)
+        # ★ 修复点：处理两种返回格式
+        # 不传参数时返回 ["metric.id.1", "metric.id.2", ...]（字符串列表）
+        # 传参数时返回 [{"id": "xxx", "value": "yyy"}, ...]（字典列表）
+        if result is not None and isinstance(result, list):
+            if len(result) > 0 and isinstance(result[0], str):
+                # 转换为统一的字典格式
+                return [{"id": m_id, "value": None} for m_id in result]
+        return result

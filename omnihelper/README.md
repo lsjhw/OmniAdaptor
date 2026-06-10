@@ -64,14 +64,17 @@ Omni算子：高性能算子，使用Native Code（C/C++）替换了大数据底
 │   ├── flink/                                              # Flink分析模块目录
 │   │   ├── flink_request.py                                # Flink REST API请求器
 │   │   ├── operator/                                       # Flink算子解析
-│   │   └── function/                                       # Flink函数解析
+│   │   ├── function/                                       # Flink函数解析
+│   │   └── schema/                                         # 根据表达式和表结构推断字段类型
 │   ├── tests/                                              # 测试目录
 │   ├── resources/                                          # 资源文件目录
 │   │   ├── omni_op_dictionary.json                         # Omni算子字典
 │   │   ├── omni_function_dictionary.json                   # Omni函数字典
 │   │   ├── omni_opname_mapping_dictionary.json             # 算子名称映射字典
 │   │   ├── flink_op_dictionary.json                        # Flink算子字典
+│   │   ├── flink_table_schema.csv                          # Flink表结构模板
 │   │   ├── flink_function_dictionary.json                  # Flink函数字典
+│   │   ├── flink_function_return_type.json                 # Flink函数返回类型字典
 │   │   ├── return_type_dictionary.json                     # 返回类型字典
 │   │   ├── udf_dictionary.json                             # UDF字典
 │   │   └── spark_table_schema.csv                          # Spark表结构模板
@@ -252,7 +255,7 @@ Omni算子：高性能算子，使用Native Code（C/C++）替换了大数据底
 准备Flink表结构信息。<br>为了提升类型识别的准确性，需导出Flink表结构至`resources/flink_table_schema.csv`，文件需包含三列：`table_name`（表名）、`field_name`（列名）、`field_type`（数据类型）。含逗号的类型需用双引号包裹。
 
 表结构导出示例：
-示例中数据表、字段，以及字段类型是nexmark的部分数据。
+示例中数据表、字段，以及字段类型是nexmark的部分数据，根据实际的SQL内容填充。
 ```csv
 table_name,field_name,field_type
 datagen,event_type,int

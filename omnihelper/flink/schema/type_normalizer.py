@@ -148,21 +148,6 @@ class TypeNormalizer:
         return TypeNormalizer.TYPE_ALIASES.get(upper, upper)
 
     @staticmethod
-    def normalize_type_for_match(type_str):
-        """
-        用于匹配的类型标准化
-
-        参数说明:
-        :param type_str: 类型字符串
-        :return: 标准化后的类型
-
-        当前实现: 仅调用 normalize_type
-        预留接口支持未来扩展匹配逻辑
-        """
-        normalized = TypeNormalizer.normalize_type(type_str)
-        return normalized
-
-    @staticmethod
     def parse_row_type(type_str):
         """
         解析 ROW 类型的内部字段结构

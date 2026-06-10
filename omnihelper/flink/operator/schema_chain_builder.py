@@ -136,8 +136,10 @@ class SchemaChainBuilder:
                 continue
 
             if op_type and current_input is not None:
-                output_schema = self.type_resolver.build_output_schema(op_type, description_data, current_input)
-                op_alias_map = (self.type_resolver.extract_alias_map_from_description(description_data))
+                # 只传入当前算子描述和JSON描述，避免不同算子间的select/groupBy等子句交叉干扰
+                filtered_desc = [desc_item] + [d for d in description_data if isinstance(d, dict)]
+                output_schema = self.type_resolver.build_output_schema(op_type, filtered_desc, current_input)
+                op_alias_map = (self.type_resolver.extract_alias_map_from_description(filtered_desc))
                 accumulated_alias_map.update(op_alias_map)
                 self.type_resolver.update_alias_map(accumulated_alias_map)
                 
@@ -279,7 +281,7 @@ class SchemaChainBuilder:
             if not item:
                 continue
             
-            original_expr, alias_name = self.type_resolver._split_alias_from_expr(item)
+            original_expr, alias_name = self.type_resolver._wrap_split_alias_from_expr(item)
             field_type = self.type_resolver.resolve_text_expr_type(original_expr, input_schema, 0)
             
             if field_type != "unknown":

@@ -166,6 +166,10 @@ class FlinkParser:
             return []
         return [m['id'] for m in available if any(m['id'].endswith(s) for s in target_metrics)]
 
+    def parse_performance_stats(self, vid, metrics_raw, jobs=None):
+        """解析性能统计数据，委托给 metrics_parser"""
+        return self.metrics_parser.parse_performance_stats(vid, metrics_raw, jobs)
+
     @staticmethod
     def _topological_sort(vertices):
         """对顶点进行拓扑排序（Kahn 算法）"""
@@ -213,14 +217,22 @@ class FlinkParser:
 
     @staticmethod
     def _aggregate_ops_by_name_and_types(ops):
-        """按算子类型聚合"""
+        """按算子类型聚合，合并相同算子的不同输入类型"""
         aggregated = {}
         for op in ops:
-            key = (op["op_type"], op["input_types_str"], op["output_types_str"])
+            key = op["op_type"]
             if key in aggregated:
                 aggregated[key]["count"] += op["count"]
                 aggregated[key]["num_in"] += op["num_in"]
                 aggregated[key]["num_out"] += op["num_out"]
+                aggregated[key]["run_time"] += op.get("run_time", 0)
+                # 合并不同的输入类型（精确匹配，避免子串误过滤）
+                existing_types = [t.strip() for t in aggregated[key]["input_types_str"].split(";") if t.strip()]
+                if op["input_types_str"] and op["input_types_str"] not in existing_types:
+                    if aggregated[key]["input_types_str"]:
+                        aggregated[key]["input_types_str"] = f"{aggregated[key]['input_types_str']}; {op['input_types_str']}"
+                    else:
+                        aggregated[key]["input_types_str"] = op["input_types_str"]
             else:
                 aggregated[key] = dict(op)
         return list(aggregated.values())

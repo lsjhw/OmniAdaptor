@@ -11,4 +11,7 @@ jobs:
 
     steps:
     - name: Run a command
-      run: uname -a && cat /etc/os-release && lscpu && mkdir /etc/yum.repos.d/bak && mv /etc/yum.repos.d/*.repo /etc/yum.repos.d/bak && echo "[OS]\nname=OS\nbaseurl=https://vault.centos.org/altarch/7.9.2009/os/aarch64\nenabled=1\ngpgcheck=0" > /etc/yum.repos.d/centos-vault.repo && cat /etc/yum/repos.d/centos-vault.repo && yum install git
+      run: uname -a && cat /etc/os-release && lscpu \
+          && mkdir /etc/yum.repos.d/bak && mv /etc/yum.repos.d/*.repo /etc/yum.repos.d/bak \
+          && echo -e "[OS]\nname=OS\nbaseurl=https://vault.centos.org/altarch/7.9.2009/os/aarch64\nenabled=1\ngpgcheck=0" > /etc/yum.repos.d/centos-vault.repo \
+          && cat /etc/yum.repos.d/centos-vault.repo && yum install git

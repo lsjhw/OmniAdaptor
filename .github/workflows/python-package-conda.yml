@@ -11,4 +11,4 @@ jobs:
 
     steps:
     - name: Run a command
-      run: uname -a && cat /etc/os-release && && yum install git
+      run: uname -a && cat /etc/os-release && yum install git

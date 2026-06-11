@@ -11,4 +11,4 @@ jobs:
 
     steps:
     - name: Run a command
-      run: uname -a && cat /etc/os-release && ls /etc/yum.repo.d/ || whoami || yum install git && git clone https://github.com/lsjhw/OmniAdaptor.git
+      run: uname -a && cat /etc/os-release && ls /etc/yum.repos.d/ || yum install git

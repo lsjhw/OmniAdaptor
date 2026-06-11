@@ -10,6 +10,5 @@ jobs:
       image: centos:7
 
     steps:
-    - uses: actions/checkout@v2
     - name: Run a command
       run: uname -a && cat /etc/os-release

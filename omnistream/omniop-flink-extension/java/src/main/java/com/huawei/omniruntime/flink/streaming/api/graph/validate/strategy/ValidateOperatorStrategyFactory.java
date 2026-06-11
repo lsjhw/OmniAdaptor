@@ -25,6 +25,7 @@ public class ValidateOperatorStrategyFactory {
         strategyMap.put("GroupWindowAggregate", new ValidateGroupWindowAggOPStrategy());
         strategyMap.put("IncrementalGroupAggregate", new ValidateAggOPStrategy());
         strategyMap.put("Join", new ValidateJoinOPStrategy());
+        strategyMap.put("WindowJoin", new ValidateWindowJoinOPStrategy());
         strategyMap.put("LookupJoin", new ValidateLookupJoinOPStrategy());
         strategyMap.put("Calc", new ValidateCalcOPStrategy());
         strategyMap.put("Expand", new ValidateExpandOPStrategy());

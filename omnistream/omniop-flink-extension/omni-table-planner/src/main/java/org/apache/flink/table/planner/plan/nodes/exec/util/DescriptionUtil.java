@@ -102,6 +102,7 @@ public class DescriptionUtil {
             aggregateCallMap.put("name", (aggCall != null ? aggCall.toString() : "null"));
             UserDefinedFunction function = aggInfo.function();
             aggregateCallMap.put("aggregationFunction", (function != null ? function.toString() : "null"));
+            aggregateCallMap.put("aggIndex", aggInfo.aggIndex());
             aggregateCallMap.put("argIndexes", aggInfo.argIndexes());
             aggregateCallMap.put("consumeRetraction", Boolean.toString(aggInfo.consumeRetraction()));
             aggregateCallMap.put("filterArg", (aggCall != null ? aggCall.filterArg : "null"));

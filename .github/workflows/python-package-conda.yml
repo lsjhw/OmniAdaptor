@@ -1,0 +1,15 @@
+name: Python Package
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-22.04-arm
+    container:
+      image: centos:7
+
+    steps:
+    - uses: actions/checkout@v4
+    - name: Run a command
+      run: uname -a && cat /etc/os-release

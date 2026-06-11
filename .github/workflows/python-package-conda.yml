@@ -20,4 +20,8 @@ jobs:
           mv /etc/yum.repos.d/*.repo /etc/yum.repos.d/bak
           echo -e "[OS]\nname=OS\nbaseurl=https://vault.centos.org/altarch/7.9.2009/os/aarch64\nenabled=1\ngpgcheck=0" > /etc/yum.repos.d/centos-vault.repo
           cat /etc/yum.repos.d/centos-vault.repo
-          yum install git
+          yum -y install git
+          git clone https://github.com/lsjhw/OmniAdaptor.git
+          cd OmniAdaptor/omnihelper
+          python -V
+          python3 -V

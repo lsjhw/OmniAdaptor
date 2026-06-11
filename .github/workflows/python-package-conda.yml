@@ -24,7 +24,9 @@ jobs:
           git clone https://github.com/lsjhw/OmniAdaptor.git
           cd OmniAdaptor/omnihelper
           python -V
-    - uses: actions/upload-artifact@v4
+    - name: upload
+      uses: softprops/action-gh-release@v2
       with:
-        name: test
-        path: util
+        tag_name: v0.1.0
+        files: |
+          build.sh

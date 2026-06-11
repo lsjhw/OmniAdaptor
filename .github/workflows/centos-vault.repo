@@ -1,0 +1,5 @@
+[OS]
+name=OS
+baseurl=https://vault.centos.org/altarch/7.9.2009/os/aarch64
+enabled=1
+gpgcheck=0
